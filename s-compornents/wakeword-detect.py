@@ -35,7 +35,7 @@ def listen_wakeword(model_path, inference_framework="onnx", chunk_size=1280, thr
 
 if __name__ == "__main__":
     listen_wakeword(
-        model_path = r"C:\Users\finou\Projects\pivot\s-compornents\paibott_o.onnx",
+        model_path = r".\compornents\taro_tsuu.onnx",
         inference_framework="onnx",
         chunk_size=1280,
         threshold=0.01
