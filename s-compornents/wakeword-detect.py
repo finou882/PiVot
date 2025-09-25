@@ -9,7 +9,7 @@ def listen_wakeword(model_path, inference_framework="onnx", chunk_size=1280, thr
     CHUNK = chunk_size
 
     audio = pyaudio.PyAudio()
-    mic_stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+    mic_stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK, input_device_index=2)
 
     # モデルパスを直接渡す（最新版仕様）
     owwModel = Model(wakeword_models=[model_path], inference_framework=inference_framework)
@@ -38,5 +38,5 @@ if __name__ == "__main__":
         model_path = r"C:\Users\finou\Projects\pivot\s-compornents\paibott_o.onnx",
         inference_framework="onnx",
         chunk_size=1280,
-        threshold=0.5
+        threshold=0.01
     )
