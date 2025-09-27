@@ -1,0 +1,9 @@
+openwakeword
+vosk
+pyaudio
+jaconv
+fugashi
+requests
+sounddevice
+numpy
+py7zr

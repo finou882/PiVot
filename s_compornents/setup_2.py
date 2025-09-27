@@ -5,6 +5,7 @@ import py7zr
 import requests
 
 openwakeword.utils.download_models()
+
 def download_file(url, filename):
     with requests.get(url, stream=True) as r:
         r.raise_for_status()
@@ -15,10 +16,11 @@ def download_file(url, filename):
 def extract_and_rename(archive_path, output_dir, new_name):
     with py7zr.SevenZipFile(archive_path, mode='r') as archive:
         archive.extractall(path=output_dir)
+    # 展開したディレクトリ名を取得してリネーム
     extracted_items = os.listdir(output_dir)
     for item in extracted_items:
         item_path = os.path.join(output_dir, item)
-        if os.path.isdir(item_path):
+        if os.path.isdir(item_path) and item != new_name:
             new_path = os.path.join(output_dir, new_name)
             shutil.move(item_path, new_path)
             break
@@ -26,7 +28,7 @@ def extract_and_rename(archive_path, output_dir, new_name):
 if __name__ == "__main__":
     url = "https://github.com/VOICEVOX/voicevox_engine/releases/download/0.24.1/voicevox_engine-linux-cpu-arm64-0.24.1.7z.001"
     archive_file = "voicevox_engine-linux-cpu-arm64-0.24.1.7z.001"
-    output_directory = os.path.dirname(os.path.abspath(__file__))  # ./s-compornents/ ディレクトリ
+    output_directory = os.path.dirname(os.path.abspath(__file__))
     rename_to = "voicevox"
     archive_path = os.path.join(output_directory, archive_file)
     if not os.path.exists(archive_path):
