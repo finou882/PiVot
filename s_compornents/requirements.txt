@@ -7,3 +7,21 @@ requests
 sounddevice
 numpy
 py7zr
+
+# Raspberry Pi Camera V1 support
+picamera
+
+# HTTP client for PiVot-Server integration
+aiohttp
+aiofiles
+
+# FastAPI for image upload server
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Image processing
+Pillow
+
+# Async support
+asyncio
