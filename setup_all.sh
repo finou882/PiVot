@@ -59,7 +59,7 @@ sudo apt install -y python3-picamera libraspberrypi-dev libraspberrypi-bin
 # その他の音声・システム依存関係
 echo "   Installing additional dependencies..."
 sudo apt install -y python3-dev libasound2-dev pulseaudio alsa-utils
-sudo apt install -y build-essential cmake pkg-config
+sudo apt install -y build-essential cmake pkg-config net-tools
 
 # 4. PiVot リポジトリのクローン
 echo ""

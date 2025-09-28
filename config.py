@@ -7,11 +7,11 @@
 
 # Windows PC (PiVot-Server) の IP アドレス
 # 実際の Windows PC の IP アドレスに変更してください
-WINDOWS_PC_IP = "192.168.1.100"  # 例: 実際のIPに変更
+WINDOWS_PC_IP = "192.168.68.50"  # Updated from network detection
 
 # PiVot-Server (Windows) 設定
-PIVOT_SERVER_URL = f"http://{WINDOWS_PC_IP}:8001"
-IMAGE_UPLOAD_SERVER_URL = f"http://{WINDOWS_PC_IP}:8002"
+PIVOT_SERVER_URL = f"http://{WINDOWS_PC_IP}:8000"
+IMAGE_UPLOAD_SERVER_URL = f"http://{WINDOWS_PC_IP}:8001"
 
 # ===========================================
 # Raspberry Pi (PiVot) 設定

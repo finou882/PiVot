@@ -1,69 +1,116 @@
 #!/bin/bash
-# PiVot Smart Assistant Startup Script (Linux/Raspberry Pi)
-# PiVot(Linux) ⟷ PiVot-Server(Windows) 構成用
-# 使用方法: ./start_pivot_assistant.sh
+# PiVot Smart Voice Assistant Startup Script
+# Comprehensive startup with network verification and error handling
 
 echo "🤖 Starting PiVot Smart Voice Assistant System"
 echo "Environment: PiVot(Linux) ⟷ PiVot-Server(Windows)"
 echo "================================================"
 
-# 0. ネットワーク設定確認
+# 1. Network Configuration Check
 echo "🔍 Checking network configuration..."
-python3 network_setup.py
+if ! python3 network_setup.py; then
+    echo "⚠️ Network configuration had issues, but continuing..."
+fi
 
-read -p "📝 Continue with current configuration? (y/N): " -r
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "❌ Configuration cancelled. Please update config.py manually."
+echo ""
+echo "📝 Continue with current configuration? (y/N): "
+read -r response
+if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo "❌ Setup cancelled by user"
     exit 1
 fi
 
-# 1. Windows PC の PiVot-Server が起動しているか確認
-echo "🧠 Checking PiVot-Server (Windows PC)..."
-WINDOWS_IP=$(grep "WINDOWS_PC_IP" config.py | cut -d'"' -f2)
-echo "   Windows PC IP: $WINDOWS_IP"
-
-# ヘルスチェック
-if curl -s --max-time 5 "http://$WINDOWS_IP:8001/health" > /dev/null; then
-    echo "   ✅ PiVot-Server is running"
+# 2. Load configuration
+echo "🔧 Loading configuration..."
+if [ -f "config.py" ]; then
+    # Extract IP from config.py
+    WINDOWS_PC_IP=$(python3 -c "
+try:
+    import config
+    print(config.WINDOWS_PC_IP)
+except Exception as e:
+    print('192.168.1.100')  # fallback
+")
+    echo "   Windows PC IP: $WINDOWS_PC_IP"
 else
+    echo "❌ config.py not found!"
+    exit 1
+fi
+
+# 3. Test PiVot-Server connectivity
+echo "🧠 Checking PiVot-Server (Windows PC)..."
+echo "   Windows PC IP: $WINDOWS_PC_IP"
+
+# Test connectivity
+SERVER_ACCESSIBLE=false
+for port in 8000 8001; do
+    if curl -s --connect-timeout 3 "http://$WINDOWS_PC_IP:$port/health" > /dev/null 2>&1 ||
+       curl -s --connect-timeout 3 "http://$WINDOWS_PC_IP:$port/" > /dev/null 2>&1; then
+        SERVER_ACCESSIBLE=true
+        echo "   ✅ PiVot-Server accessible on port $port"
+        break
+    fi
+done
+
+if [ "$SERVER_ACCESSIBLE" = false ]; then
     echo "   ❌ PiVot-Server not accessible"
     echo "   💡 Make sure PiVot-Server is running on Windows PC"
     echo "   💡 Check IP address and firewall settings"
-    read -p "🔄 Continue anyway? (y/N): " -r
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo ""
+    echo "🔄 Continue anyway? (y/N): "
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        echo "❌ Cannot proceed without server connection"
         exit 1
     fi
 fi
 
-# 2. PiVot Assistant (メインシステム) を起動
+# 4. Start PiVot Assistant
 echo "🎤 Starting PiVot Smart Assistant (Linux)..."
+
+# Kill any existing processes
+pkill -f "python.*main.py" 2>/dev/null || true
+sleep 2
+
+# Start main assistant process in background
 python3 main.py &
-ASSISTANT_PID=$!
-echo "   Assistant PID: $ASSISTANT_PID"
+MAIN_PID=$!
+echo "   Assistant PID: $MAIN_PID"
+
+# Wait a moment for startup
+sleep 3
+
+# Check if process is still running
+if ! kill -0 $MAIN_PID 2>/dev/null; then
+    echo "❌ PiVot Assistant failed to start"
+    echo "   Check for error messages above"
+    exit 1
+fi
 
 echo "================================================"
 echo "✅ PiVot Smart Assistant System Started!"
 echo ""
 echo "🔗 Remote Services (Windows PC):"
-echo "   NPU Server: http://$WINDOWS_IP:8001"
-echo "   Upload Server: http://$WINDOWS_IP:8002"
-echo "   Swagger UI: http://$WINDOWS_IP:8001/docs"
+echo "   NPU Server: http://$WINDOWS_PC_IP:8000"
+echo "   Upload Server: http://$WINDOWS_PC_IP:8001"  
+echo "   Swagger UI: http://$WINDOWS_PC_IP:8000/docs"
 echo ""
-echo "🎤 Say 'taro_tsuu' to activate the assistant"
+echo "🎤 Say 'タロー通' to activate the assistant"
 echo "📷 Camera will capture and send to Windows PC for NPU processing"
 echo "🛑 Press Ctrl+C to stop the assistant"
 echo "================================================"
 
-# Ctrl+C でクリーンアップ
+# Handle cleanup on exit
 cleanup() {
     echo ""
-    echo "🛑 Stopping PiVot Smart Assistant..."
-    kill $ASSISTANT_PID 2>/dev/null
-    echo "✅ Assistant stopped"
+    echo "🛑 Stopping PiVot Assistant..."
+    kill $MAIN_PID 2>/dev/null || true
+    pkill -f "python.*main.py" 2>/dev/null || true
+    echo "✅ PiVot Assistant stopped"
     exit 0
 }
 
-trap cleanup INT
+trap cleanup INT TERM
 
-# メインプロセスを待機
-wait $ASSISTANT_PID
+# Wait for main process
+wait $MAIN_PID
