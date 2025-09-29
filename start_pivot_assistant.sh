@@ -65,7 +65,29 @@ if [ "$SERVER_ACCESSIBLE" = false ]; then
     fi
 fi
 
-# 4. Start PiVot Assistant
+# 4. Start VoiceVox TTS Engine
+echo "🔊 Starting VoiceVox TTS Engine..."
+if [ -f "./s_compornents/compornents/voicevox/run" ]; then
+    # VoiceVoxをバックグラウンドで起動
+    ./s_compornents/compornents/voicevox/run &
+    VOICEVOX_PID=$!
+    echo "   VoiceVox PID: $VOICEVOX_PID"
+    
+    # VoiceVoxの起動を少し待つ
+    sleep 5
+    
+    # VoiceVoxが起動しているかチェック
+    if kill -0 $VOICEVOX_PID 2>/dev/null; then
+        echo "   ✅ VoiceVox TTS Engine started successfully"
+    else
+        echo "   ⚠️ VoiceVox may have failed to start"
+    fi
+else
+    echo "   ⚠️ VoiceVox run script not found at ./s_compornents/compornents/voicevox/run"
+    echo "   🔊 TTS functionality may be limited"
+fi
+
+# 5. Start PiVot Assistant
 echo "🎤 Starting PiVot Smart Assistant (Linux)..."
 
 # Kill any existing processes
@@ -95,7 +117,10 @@ echo "   NPU Server: http://$WINDOWS_PC_IP:8000"
 echo "   Upload Server: http://$WINDOWS_PC_IP:8001"  
 echo "   Swagger UI: http://$WINDOWS_PC_IP:8000/docs"
 echo ""
-echo "🎤 Say 'タロー通' to activate the assistant"
+echo "🔊 Local Services (Raspberry Pi):"
+echo "   VoiceVox TTS: http://localhost:50021"
+echo ""
+echo "🎤 Say 'taro_two' to activate the assistant"
 echo "📷 Camera will capture and send to Windows PC for NPU processing"
 echo "🛑 Press Ctrl+C to stop the assistant"
 echo "================================================"
@@ -106,6 +131,14 @@ cleanup() {
     echo "🛑 Stopping PiVot Assistant..."
     kill $MAIN_PID 2>/dev/null || true
     pkill -f "python.*main.py" 2>/dev/null || true
+    
+    # Stop VoiceVox if running
+    if [ ! -z "$VOICEVOX_PID" ]; then
+        echo "🔊 Stopping VoiceVox TTS Engine..."
+        kill $VOICEVOX_PID 2>/dev/null || true
+        pkill -f "voicevox" 2>/dev/null || true
+    fi
+    
     echo "✅ PiVot Assistant stopped"
     exit 0
 }
