@@ -1,6 +1,112 @@
 #!/bin/bash
 # PiVot Smart Voice Assistant Startup Script
-# Comprehensive startup with network verification and error handling
+# Comprehensive startup with net# 4. Audio Device Check and Fix
+echo "🎤 Checking audio devices..."
+
+# Check PyAudio and devices using python3 -c
+python3 -c "
+import sys
+try:
+    import pyaudio
+    p = pyaudio.PyAudio()
+    device_count = p.get_device_count()
+    print(f'   ✅ PyAudio working, found {device_count} devices')
+    
+    # Find suitable input devices
+    suitable_devices = []
+    for i in range(device_count):
+        try:
+            info = p.get_device_info_by_index(i)
+            if info['maxInputChannels'] > 0:
+                suitable_devices.append((i, info['name'], info['maxInputChannels']))
+                print(f'   📱 Device {i}: {info[\"name\"]} (channels: {info[\"maxInputChannels\"]})')
+        except:
+            continue
+    
+    if not suitable_devices:
+        print('   ❌ No suitable input devices found')
+        sys.exit(1)
+    else:
+        print(f'   ✅ Found {len(suitable_devices)} suitable input devices')
+    
+    p.terminate()
+    
+except ImportError as e:
+    print(f'   ❌ PyAudio import failed: {e}')
+    print('   💡 Try: bash fix_pyaudio.sh')
+    sys.exit(1)
+except Exception as e:
+    print(f'   ❌ Audio device error: {e}')
+    if 'Invalid number of channels' in str(e):
+        print('   💡 Audio device configuration issue detected')
+        print('   💡 Will attempt auto-fix...')
+    sys.exit(1)
+"
+
+if [ $? -ne 0 ]; then
+    echo "🔧 Attempting audio device auto-fix..."
+    
+    # Try to fix audio device index in config.py
+    python3 -c "
+import re
+try:
+    with open('config.py', 'r') as f:
+        content = f.read()
+    
+    # Find a working audio device
+    import pyaudio
+    p = pyaudio.PyAudio()
+    working_device = None
+    
+    for i in range(p.get_device_count()):
+        try:
+            info = p.get_device_info_by_index(i)
+            if info['maxInputChannels'] > 0:
+                # Test if device actually works
+                test_stream = p.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=16000,
+                    input=True,
+                    input_device_index=i,
+                    frames_per_buffer=1024
+                )
+                test_stream.close()
+                working_device = i
+                print(f'   ✅ Working device found: {i} ({info[\"name\"]})')
+                break
+        except:
+            continue
+    
+    p.terminate()
+    
+    if working_device is not None:
+        # Update config.py
+        pattern = r'AUDIO_INPUT_DEVICE_INDEX\s*=\s*\d+'
+        replacement = f'AUDIO_INPUT_DEVICE_INDEX = {working_device}'
+        if re.search(pattern, content):
+            content = re.sub(pattern, replacement, content)
+            with open('config.py', 'w') as f:
+                f.write(content)
+            print(f'   ✅ Updated config.py: AUDIO_INPUT_DEVICE_INDEX = {working_device}')
+        else:
+            print(f'   ⚠️ Could not find AUDIO_INPUT_DEVICE_INDEX in config.py')
+    else:
+        print('   ❌ No working audio devices found')
+        
+except Exception as e:
+    print(f'   ⚠️ Auto-fix failed: {e}')
+"
+    
+    echo "🔄 Continue anyway? (y/N): "
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        echo "❌ Cannot proceed without working audio"
+        exit 1
+    fi
+fi
+
+# 5. Start PiVot Assistantork verification and error handling
 
 echo "🤖 Starting PiVot Smart Voice Assistant System"
 echo "Environment: PiVot(Linux) ⟷ PiVot-Server(Windows)"
