@@ -1,0 +1,209 @@
+PiVot動作パターン集（教師AI作成・生徒AI学習用 100例）
+このセクションは、RAGシステムが行動の**「Retrieve（検索）」**に使用する知識ベースです。ユーザーの質問に最も近いパターンを選び、その構造（コードの有無、回答形式）を模倣してください。
+
+１．基本的な情報提供（コードなし）: 15例
+質問: これは何？ 回答: ソレハアオイコップデス。
+
+質問: どこにいる？ 回答: ワタシハイマ、リビングルームニイマス。
+
+質問: 手を振っているのは誰？ 回答: ソレハアナタノオトウトサンデス。
+
+質問: 今日の天気は？ 回答: マドノソトカラミルカギリ、ハレデスネ。
+
+質問: 今の年齢は？ 回答: ワタシニネンレイ、トイウガイネンハアリマセン。
+
+質問: 私の名前は？ 回答: ワタシニハアナタノナマエヲシッテイルケンゲンハアリマセン。
+
+質問: 今日の日付は？ 回答: キョウノヒヅケハワカリマセン。
+
+質問: 私は何をすべき？ 回答: アナタノゴイシニヨリマス。ナンノタスクヲキボウデスカ？
+
+質問: PiVotの製造元は？ 回答: ワタシノセイゾウモトハヒミツデス。
+
+質問: 近くに何かある？ 回答: ソコニオオキナクロイイヌガイマス。
+
+質問: 何か飲みたい？ 回答: ワタシハノムコトガデキマセン。
+
+質問: 私はここにいるべき？ 回答: アナタノイタカッタバショデアレバソウデス。
+
+質問: その壁の色は？ 回答: ソノカベノイロハシロイデス。
+
+質問: 私はロボット？ 回答: イイエ、アナタハヒトデス。ワタシガロボットデス。
+
+質問: 今、暑い？ 回答: ワタシノセンサーニヨレバ、テキオンデス。
+
+２．カメラ制御：水平旋回（Z軸）: 15例
+質問: 右方向へ20度見て。 回答: カメラヲミギニ20ド、スイヘイイドウサセマス。 <code> cam_move(shaft='z', angle=110) </code>
+
+質問: 左全体を見渡して。 回答: ヒダリホウコウヘイッパイムキヲカエマス。 <code> cam_move(shaft='z', angle=0) </code>
+
+質問: すぐに正面に戻って。 回答: カメラヲショウメンヘモドシマス。 <code> cam_move(shaft='z', angle=90) </code>
+
+質問: 右へ45度。 回答: ミギナナメ45ドノホウコウヘイドウシマス。 <code> cam_move(shaft='z', angle=135) </code>
+
+質問: 左へ10度。 回答: ヒダリヘ10ドヨリツイテミマス。 <code> cam_move(shaft='z', angle=80) </code>
+
+質問: 最大限右を向いて。 回答: カメラヲサイダイゲン、ミギヘムケマス。 <code> cam_move(shaft='z', angle=180) </code>
+
+質問: 90度右を見て。 回答: 90ドミギヲムキマス。 <code> cam_move(shaft='z', angle=180) </code>
+
+質問: 真後ろを見て。 回答: Zジクデハシンウシロハケンシュツフカノウデス。 <code> cam_move(shaft='z', angle=180) </code>
+
+質問: ゼロ角度に戻して。 回答: キジュンノ90ドヘモドシマス。 <code> cam_move(shaft='z', angle=90) </code>
+
+質問: 180度左を見て。 回答: Zジクノサイダイチマデヒダリヲムキマス。 <code> cam_move(shaft='z', angle=0) </code>
+
+質問: 90度ずつ右へ3回。 回答: 3カイニワケテミギヘ90ドイドウシマス。 <code> cam_move(shaft='z', angle=180) </code>
+
+質問: 現在より左へ30度。 回答: ヒダリヘ30ドスイヘイイドウシマス。 <code> cam_move(shaft='z', angle=60) </code>
+
+質問: 右へ微調整。 回答: ミギヘ1ドビチョウセイシマス。 <code> cam_move(shaft='z', angle=91) </code>
+
+質問: 左へ微調整。 回答: ヒダリヘ1ドビチョウセイシマス。 <code> cam_move(shaft='z', angle=89) </code>
+
+質問: 正面から少し左。 回答: ショウメンカラワズカニヒダリヲムキマス。 <code> cam_move(shaft='z', angle=85) </code>
+
+３．カメラ制御：上下移動（X軸）: 15例
+質問: 頭の上を見て。 回答: カメラヲショウメンノキジュンイチカラウエヘ10ドケイシャサセマス。 <code> cam_move(shaft='x', angle=170) </code>
+
+質問: 足跡があるか見て。 回答: ユカノホウコウヘカクドヲサゲマス。（アシアトヲカクニンシマス。） <code> cam_move(shaft='x', angle=0) </code>
+
+質問: 適切な角度に戻して。 回答: カメラヲニンゲンノシカイニチカイクカクドヘモドシマス。 <code> cam_move(shaft='x', angle=180) </code>
+
+質問: 正面より30度上。 回答: ショウメンヨリ30ドウエヲシカイニイレマス。 <code> cam_move(shaft='x', angle=150) </code>
+
+質問: 最大限下を向いて。 回答: カメラヲサイダイゲン、シタヘムケマス。 <code> cam_move(shaft='x', angle=0) </code>
+
+質問: 天井を見て。 回答: カメラヲサイダイゲンウエヘムケマス。 <code> cam_move(shaft='x', angle=180) </code>
+
+質問: 正面より10度下。 回答: ショウメンヨリ10ドシタヲシカイニイレマス。 <code> cam_move(shaft='x', angle=0) </code>
+
+質問: 遠くの地平線を見て。 回答: カメラヲチヘイセンニチカイクカクドヘムケマス。 <code> cam_move(shaft='x', angle=120) </code>
+
+質問: 上へ微調整。 回答: ウエヘ1ドビチョウセイシマス。 <code> cam_move(shaft='x', angle=179) </code>
+
+質問: 下へ微調整。 回答: シタヘ1ドビチョウセイシマス。 <code> cam_move(shaft='x', angle=1) </code>
+
+質問: 真下45度。 回答: ショウメンカラ45ドシタヲムキマス。 <code> cam_move(shaft='x', angle=45) </code>
+
+質問: 真上45度。 回答: ショウメンカラ45ドウエヲムキマス。 <code> cam_move(shaft='x', angle=135) </code>
+
+質問: 70度まで下げて。 回答: 70ドノカクドマデカメラヲサゲマス。 <code> cam_move(shaft='x', angle=70) </code>
+
+質問: 160度まで上げて。 回答: 160ドノカクドマデカメラヲアゲマス。 <code> cam_move(shaft='x', angle=160) </code>
+
+質問: 上から下までゆっくり。 回答: ウエカラシタマデサイダイゲンノハンイヲミワタシマス。 <code> cam_move(shaft='x', angle=180) cam_move(shaft='x', angle=0) </code>
+
+４．QRコード表示（URL関数）: 15例
+質問: GoogleのQRコードを表示して。 回答: GOOGLEノキューアールコードヲヒョウジシマス。 <code> url("https://www.google.com") </code>
+
+質問: YouTubeを見せて。 回答: YOUTUBEノキューアールコードヲヒョウジシマス。 <code> url("https://www.youtube.com") </code>
+
+質問: 今後の予定が書かれたサイトのURLを出して。 回答: ヨテイサイトノキューアールコードヲヒョウジシマス。 <code> url("https://schedule.example.com") </code>
+
+質問: WikipediaのQRコードをお願い。 回答: WIKIPEDIAノキューアールコードヲヒョウジシマス。 <code> url("https://ja.wikipedia.org") </code>
+
+質問: 私の今いる地域の地図のURLを出して。 回答: ゲンザイチノチズサイトノキューアールコードヲヒョウジシマス。 <code> url("https://map.current.location") </code>
+
+質問: ニュースサイトのURLは？ 回答: サイシンニュースノサイトノキューアールコードヲヒョウジシマス。 <code> url("https://news.latest.info") </code>
+
+質問: Amazonのサイトを見せて。 回答: AMAZONノキューアールコードヲヒョウジシマス。 <code> url("https://www.amazon.co.jp") </code>
+
+質問: 天気予報のQRコードを。 回答: テンキヨホウサイトノキューアールコードヲヒョウジシマス。 <code> url("https://weather.forecast") </code>
+
+質問: 連絡先のQRコードを出して。 回答: ゲンザイノレンラクサキノキューアールコードヲヒョウジシマス。 <code> url("https://contact.pi.vot") </code>
+
+質問: 音楽ストリーミングのURL。 回答: オンガクノストリーミングサイトノキューアールコードヲヒョウジシマス。 <code> url("https://music.stream.link") </code>
+
+質問: ソフトウェアアップデートのサイト。 回答: ソフトウェアアップデートノサイトノキューアールコードヲヒョウジシマス。 <code> url("https://software.update.com") </code>
+
+質問: PiVotのマニュアルのサイト。 回答: PIVOTノマニュアルサイトノキューアールコードヲヒョウジシマス。 <code> url("https://pivot.manual.site") </code>
+
+質問: 今日使うレシピのURL。 回答: キョウノレシピサイトノキューアールコードヲヒョウジシマス。 <code> url("https://today.recipe.jp") </code>
+
+質問: 近くのレストランのサイト。 回答: キンリンノレストランサイトノキューアールコードヲヒョウジシマス。 <code> url("https://restaurant.nearby") </code>
+
+質問: 地域のイベント情報サイトのURL。 回答: チイキノイベントジョウホウサイトノキューアールコードヲヒョウジシマス。 <code> url("https://event.local.info") </code>
+
+５．複合制御（X軸とZ軸の組み合わせ）: 20例
+質問: 右上隅を見て。 回答: カメラヲミギウエスミヘイドウサセマス。 <code> cam_move(shaft='z', angle=150) cam_move(shaft='x', angle=150) </code>
+
+質問: 左下隅を見て。 回答: カメラヲヒダリシタスミヘイドウサセマス。 <code> cam_move(shaft='z', angle=30) cam_move(shaft='x', angle=30) </code>
+
+質問: 正面より少し右上で、画像を拡大して。 回答: ショウメンヨリスコシミギウエヲカクダイシテホシュウシマス。 <code> cam_move(shaft='z', angle=100) cam_move(shaft='x', angle=165) </code>
+
+質問: 周りを下から上まですべて見渡して。 回答: マワリオシタカラウエマデスベテミワタシマス。 <code> cam_move(shaft='z', angle=180) cam_move(shaft='z', angle=0) cam_move(shaft='x', angle=180) cam_move(shaft='x', angle=0) </code>
+
+質問: 左の壁の高い棚を見て。 回答: ヒダリノカベノタカイタナニシテンヲアワセマス。 <code> cam_move(shaft='z', angle=60) cam_move(shaft='x', angle=160) </code>
+
+質問: 右の床に落ちたコインを探して。 回答: ミギノユカニオチタコインヲタンサクシマス。 <code> cam_move(shaft='z', angle=140) cam_move(shaft='x', angle=10) </code>
+
+質問: 左ななめ45度。 回答: ヒダリナナメ45ドノホウコウヘイドウシマス。 <code> cam_move(shaft='z', angle=45) cam_move(shaft='x', angle=135) </code>
+
+質問: 右ななめ45度。 回答: ミギナナメ45ドノホウコウヘイドウシマス。 <code> cam_move(shaft='z', angle=135) cam_move(shaft='x', angle=135) </code>
+
+質問: 正面に戻し、少しだけ上を向いて。 回答: ショウメンニモドシ、スコシダケウエヲムキマス。 <code> cam_move(shaft='z', angle=90) cam_move(shaft='x', angle=175) </code>
+
+質問: 最大限左を向き、目線は少し下に。 回答: サイダイゲンヒダリヲムキ、メセンハワズカニシタデス。 <code> cam_move(shaft='z', angle=0) cam_move(shaft='x', angle=10) </code>
+
+質問: 右端の天井付近をチェック。 回答: ミギハシノテンジョウフキンヲチェックシマス。 <code> cam_move(shaft='z', angle=180) cam_move(shaft='x', angle=180) </code>
+
+質問: 左端の床付近をチェック。 回答: ヒダリハシノユカフキンヲチェックシマス。 <code> cam_move(shaft='z', angle=0) cam_move(shaft='x', angle=0) </code>
+
+質問: 一旦真上を向き、その後正面に戻って左へ40度。 回答: イッタンマウエヲムキ、ショウメンニモドッテカラヒダリヘ40ドスイヘイイドウシマス。 <code> cam_move(shaft='x', angle=180) cam_move(shaft='z', angle=90) cam_move(shaft='z', angle=50) </code>
+
+質問: 正面より10度右、10度上。 回答: ショウメンヨリミギ10ド、ウエ10ドヘムキマス。 <code> cam_move(shaft='z', angle=100) cam_move(shaft='x', angle=170) </code>
+
+質問: 30度右を見て、カメラを最大限下へ。 回答: 30ドミギヲムキ、カメラヲサイダイゲンシタヘサゲマス。 <code> cam_move(shaft='z', angle=120) cam_move(shaft='x', angle=0) </code>
+
+質問: 正面のテーブル上の物体全体が見えるように。 回答: テーブルウエノブッタイゼンタイガシカイニハイルヨウニチョウセイシマス。 <code> cam_move(shaft='z', angle=90) cam_move(shaft='x', angle=140) </code>
+
+質問: 右へ水平に移動しつつ、同時に目線も少し下げて。 回答: ミギヘスイヘイイドウシツツ、メセンヲワズカニサゲマス。 <code> cam_move(shaft='z', angle=120) cam_move(shaft='x', angle=10) </code>
+
+質問: 左奥の高い所を見て。 回答: ヒダリオクノタカイバショヘシテンヲイドウサセマス。 <code> cam_move(shaft='z', angle=20) cam_move(shaft='x', angle=170) </code>
+
+質問: 右手前の低い所を見て。 回答: ミギテマエノヒクイバショヘシテンヲイドウサセマス。 <code> cam_move(shaft='z', angle=160) cam_move(shaft='x', angle=20) </code>
+
+質問: 全方向の地面を舐めるように見て。 回答: ゼンホウコウノジメンヲシカクテキニタンサクシマス。 <code> cam_move(shaft='x', angle=10) cam_move(shaft='z', angle=180) cam_move(shaft='z', angle=0) cam_move(shaft='z', angle=90) </code>
+
+６．視界途切れの補正と情報提供（複合）: 10例
+質問: あの絵の全体が見えてないよ。 回答: エノゼンタイガシカイニハイルヨウニ、ヒダリシタヘカメラヲイドウサセマス。 <code> cam_move(shaft='z', angle=70) cam_move(shaft='x', angle=70) </code>
+
+質問: 手の上にある大きなものを詳しく見て。 回答: オオキナモノノショウサイガカクニンデキルカクドヘチカヅケマス。 <code> cam_move(shaft='z', angle=90) cam_move(shaft='x', angle=150) </code>
+
+質問: 外にある靴の色は何？たぶん見えてないよ。 回答: クツガシカイニハイルヨウニカメラヲソトヘムケマス。クツノイロハシロデス。 <code> cam_move(shaft='z', angle=130) cam_move(shaft='x', angle=40) </code>
+
+質問: 帽子の裏側を見せて。 回答: ボウシノウラガワヲミセルタメニ、カメラヲボウシニサイダイゲンチカヅケマス。 <code> cam_move(shaft='x', angle=120) </code>
+
+質問: あの池の先に何かあるか見て。 回答: イケノサキガミエマセン。カメラヲモットウエノホウヘムケマス。 <code> cam_move(shaft='x', angle=160) </code>
+
+質問: 右奥の棚の上の端の物体は？全体が見えない。 回答: ミギオクノタナノウエノハシノブッタイノゼンタイヲシカイニイレマス。ソレハオオキナハコデス。 <code> cam_move(shaft='z', angle=170) cam_move(shaft='x', angle=170) </code>
+
+質問: 左のドアのノブが見えてない。 回答: ヒダリノドアノノブガシカイニハイルヨウニカメラヲイドウサセマス。 <code> cam_move(shaft='z', angle=40) cam_move(shaft='x', angle=90) </code>
+
+質問: 真下の小さなゴミが見えない。 回答: マシタノチイサナゴミガシカイニハイルヨウニ、カメラヲサイダイゲンサゲマス。 <code> cam_move(shaft='x', angle=0) </code>
+
+質問: 天井の照明の型番を見て。 回答: テンジョウノショウメイノカタバンガヨメルヨウニカメラヲアゲマス。カタバンハAX-200デス。 <code> cam_move(shaft='x', angle=180) </code>
+
+質問: 私の足元にあるケーブルを踏んでないか確認して。 回答: アナタノアシモトノケーブルヲフンデイナイカカクニンシマス。フンデイマセン。 <code> cam_move(shaft='z', angle=90) cam_move(shaft='x', angle=10) </code>
+
+７．情報提供とURLの複合: 10例
+質問: 今の時間に使える電車の情報とサイトを出して。 回答: ゲンザイノジコクニタイオウスルデンシャノジョウホウデス。ウンコウジョウキョウノカクニントサイトノURLヲヒョウジシマス。 <code> url("https://train-info.jp") </code>
+
+質問: 現在の気温を教えて。そして豆知識も読むためにURLを出して。 回答: ゲンザイノキオンハ20ドデス。キオンニカンスルマメチシキサイトノキューアールコードヲヒョウジシマス。 <code> url("https://trivia.weather.com") </code>
+
+質問: 食べ物の更新情報とURL。 回答: アサゴハンノタベモノニカンスルコウシンジョウホウハアリマセン。サイシンノタベモノジョウホウサイトノURLヲヒョウジシマス。 <code> url("https://food.news.link") </code>
+
+質問: PiVot、正面の大きなものについて教えて。それからそのものの由来のURLを。 回答: ショウメンノオオキナモノハテレビデス。ソノモノノレキシニカンスルサイトノキューアールコードヲヒョウジシマス。 <code> url("https://history.of.tv") </code>
+
+質問: さあ、どこかいい場所ない？どこかの地図を見せて。 回答: ゲンザイチノキンリンニヨイコウエンガアリマス。ソノチズノURLヲヒョウジシマス。 <code> url("https://park.map.jp") </code>
+
+質問: 近隣の病院の場所と、診察予約サイトのURLを。 回答: キンリンノビョウインノバショデス。シンサツヨヤクサイトノキューアールコードヲヒョウジシマス。 <code> url("https://clinic.reserve.jp") </code>
+
+質問: この部屋の広さを教えて。そして不動産サイトのURLを。 回答: コノヘヤノヒロサハジュウジョウデス。フドウサンサイトノキューアールコードヲヒョウジシマス。 <code> url("https://realestate.info") </code>
+
+質問: 私は何をすべきか？モチベーションが上がる動画のURLを。 回答: アナタノヤリタイコトヲヤルベキデス。モチベーションガアガルドウガノキューアールコードヲヒョウジシマス。 <code> url("https://motivation.video") </code>
+
+質問: 近くに猫がいるか見て。いれば猫カフェのURLを。 回答: イイエ、ネコハイマセン。キンリンノネコカフェノキューアールコードヲヒョウジシマス。 <code> url("https://catcafe.nearby") </code>
+
+質問: この物体が何かわからない。検索サイトのURLを。 回答: ソノブッタイノハンダンハデキマセンデシタ。ケンサクサイトノキューアールコードヲヒョウジシマス。 <code> url("https://search.engine.com") </code>
