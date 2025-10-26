@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PiVot 音声アシスタント</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .container {
+            text-align: center;
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .info { background-color: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 PiVot 音声アシスタント</h1>
+        <p>ボタンを押して音声認識を開始</p>
+        
+        <button id="startBtn" onclick="startRecognition()">音声認識開始</button>
+        
+        <div id="status"></div>
+    </div>
+
+    <script>
+        function startRecognition() {
+            const btn = document.getElementById('startBtn');
+            const status = document.getElementById('status');
+            
+            btn.disabled = true;
+            btn.textContent = '認識中...';
+            status.innerHTML = '<div class="info">音声認識を開始しています...</div>';
+            
+            fetch('http://pi.local:8100/clicked', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    status.innerHTML = `
+                        <div class="success">
+                            <strong>成功!</strong><br>
+                            <strong>認識結果:</strong> ${data.transcript || '(なし)'}<br>
+                            <strong>AI応答:</strong> ${data.ai_response || '(なし)'}
+                        </div>
+                    `;
+                } else {
+                    status.innerHTML = `
+                        <div class="error">
+                            <strong>エラー:</strong> ${data.message}
+                        </div>
+                    `;
+                }
+            })
+            .catch(error => {
+                status.innerHTML = `
+                    <div class="error">
+                        <strong>通信エラー:</strong> ${error.message}
+                    </div>
+                `;
+            })
+            .finally(() => {
+                btn.disabled = false;
+                btn.textContent = '音声認識開始';
+            });
+        }
+    </script>
+</body>
+</html>
