@@ -3,6 +3,7 @@ import subprocess
 import time
 import threading
 import numpy as np
+import re
 
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
@@ -14,6 +15,9 @@ from PIL import Image
 import pyaudio
 from faster_whisper import WhisperModel
 import wave
+
+# --- サーボ制御ライブラリ ---
+from servo_control import cam_move, url
 
 # --- カメラライブラリ (picamera2を推奨) ---
 try:
@@ -121,6 +125,86 @@ def take_picture(path=IMAGE_PATH):
         print(f"カメラ撮影中にエラーが発生しました: {e}")
         return False
 
+# --- AI応答パース関数 ---
+def parse_ai_response(response_text):
+    """
+    AI応答からタグを抽出して分離する
+    
+    Parameters:
+    -----------
+    response_text : str
+        AI応答の全文
+    
+    Returns:
+    --------
+    dict
+        {
+            'response': str - ユーザーへの応答テキスト（<response>タグ内）,
+            'code': str - 実行するコード（<code>タグ内）,
+            'raw': str - タグを除去した全文
+        }
+    """
+    result = {
+        'response': '',
+        'code': '',
+        'raw': response_text
+    }
+    
+    # <response>タグの抽出
+    response_match = re.search(r'<response>(.*?)</response>', response_text, re.DOTALL)
+    if response_match:
+        result['response'] = response_match.group(1).strip()
+    
+    # <code>タグの抽出
+    code_match = re.search(r'<code>(.*?)</code>', response_text, re.DOTALL)
+    if code_match:
+        result['code'] = code_match.group(1).strip()
+    
+    # タグを除去した全文を取得
+    raw_text = response_text
+    raw_text = re.sub(r'<response>.*?</response>', '', raw_text, flags=re.DOTALL)
+    raw_text = re.sub(r'<code>.*?</code>', '', raw_text, flags=re.DOTALL)
+    result['raw'] = raw_text.strip()
+    
+    return result
+
+
+def execute_ai_code(code_string):
+    """
+    AI応答から抽出したコードを安全に実行する
+    
+    Parameters:
+    -----------
+    code_string : str
+        実行するPythonコード
+    
+    Returns:
+    --------
+    bool
+        実行が成功した場合True, 失敗した場合False
+    """
+    if not code_string:
+        return True
+    
+    print(f"🔧 コード実行: {code_string}")
+    
+    # 安全な実行環境を準備
+    # cam_move と url 関数のみを許可
+    allowed_globals = {
+        'cam_move': cam_move,
+        'url': url,
+        '__builtins__': {}  # 組み込み関数を制限
+    }
+    
+    try:
+        # コードを実行
+        exec(code_string, allowed_globals, {})
+        print("✅ コード実行完了")
+        return True
+    except Exception as e:
+        print(f"❌ コード実行エラー: {e}")
+        return False
+
 # --- メイン処理関数 ---
 def process_request(user_text, image_path):
     """Gemini APIにリクエストを送信し、応答を音声で出力する."""
@@ -166,14 +250,31 @@ def process_request(user_text, image_path):
     try:
         response = CHAT.send_message(contents)
         ai_response = response.text
-        print(f"🤖 AI応答: {ai_response}")
-        speak(ai_response) # 音声で読み上げ
-        return {"status": "success", "ai_response": ai_response}
+        print(f"🤖 AI応答（生）: {ai_response}")
+        
+        # AI応答をパースする
+        parsed = parse_ai_response(ai_response)
+        
+        # 応答テキストを取得（<response>タグがあればそれを使用、なければ全文）
+        response_text = parsed['response'] if parsed['response'] else parsed['raw']
+        
+        # コードを実行
+        if parsed['code']:
+            print(f"📝 抽出されたコード: {parsed['code']}")
+            execute_ai_code(parsed['code'])
+        
+        # 音声で読み上げ（応答テキストのみ）
+        if response_text:
+            print(f"🤖 AI応答（音声出力）: {response_text}")
+            speak(response_text)
+        
+        return {"status": "success", "ai_response": ai_response, "spoken_text": response_text}
     except Exception as e:
         error_message = f"Gemini APIエラー: {e}"
         print(error_message)
         speak("ごめんなさい。AIとの通信に失敗しました。")
         return {"status": "error", "ai_response": "AIとの通信に失敗しました。"}
+
 
 
 # --- HTTP エンドポイント ---
@@ -296,8 +397,8 @@ def start_voice_recognition():
             try:
                 response_data = process_request(user_transcript, IMAGE_PATH)
                 ai_response = response_data.get("ai_response", "AI応答の取得に失敗しました")
-                print(f"🤖 AI応答: {ai_response}")
-                speak(ai_response)
+                print(f"🤖 AI完全応答: {ai_response}")
+                # 音声出力はprocess_request内で実行済み
             except Exception as e:
                 ai_response = f"AIエラー: {e}"
                 speak("ごめんなさい。AIとの通信に失敗しました。")
