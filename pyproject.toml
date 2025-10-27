@@ -19,4 +19,5 @@ dependencies = [
     "python-dotenv>=1.1.1",
     "qrcode[pil]>=8.0",
     "scipy>=1.13.1",
+    "smbus2>=0.4.0",
 ]
