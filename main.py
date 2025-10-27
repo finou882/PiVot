@@ -38,7 +38,9 @@ if not GOOGLE_API_KEY:
 # API設定
 genai.configure(api_key=GOOGLE_API_KEY)
 MODEL_NAME = "gemini-flash-lite-latest"
+ROBOTICS_MODEL_NAME = "gemini-2.0-flash-exp"  # Gemini-Robotics-ER model
 gemini_model = genai.GenerativeModel(MODEL_NAME)
+robotics_model = genai.GenerativeModel(ROBOTICS_MODEL_NAME)
 
 # Whisper設定
 # tiny, base, small, medium, largeから選択（baseは日本語認識がより良い）
@@ -62,6 +64,7 @@ DEFAULT_PROMPT = "この画像について何か尋ねていますか？"
 # システム指示は、最初のメッセージに含めるか、Geminiモデルに渡す（ここでは最初のメッセージに含めます）
 CHAT = gemini_model.start_chat(history=[])
 print(f"✅ Geminiモデル: {MODEL_NAME} でチャットセッションを開始しました。")
+print(f"✅ Robotics-ERモデル: {ROBOTICS_MODEL_NAME} を初期化しました。")
 
 # --- Flask アプリケーション設定 ---
 app = Flask(__name__)
@@ -229,6 +232,33 @@ def execute_ai_code(code_string):
         print(f"❌ コード実行エラー: {e}")
         return False
 
+# --- Robotics-ER画像解析関数 ---
+def analyze_image_with_robotics_er(image):
+    """
+    Gemini-Robotics-ERモデルで画像を解析する
+    
+    Parameters:
+    -----------
+    image : PIL.Image
+        解析する画像
+    
+    Returns:
+    --------
+    str
+        画像の解析結果テキスト
+    """
+    try:
+        print("🤖 Robotics-ERモデルで画像を解析中...")
+        # Robotics-ERモデルに画像を送信して解析
+        prompt = "この画像に写っているものを詳しく説明してください。物体の位置、色、形状、空間的な関係性を含めて説明してください。"
+        response = robotics_model.generate_content([prompt, image])
+        analysis_result = response.text
+        print(f"🔍 Robotics-ER解析結果: {analysis_result[:200]}..." if len(analysis_result) > 200 else f"🔍 Robotics-ER解析結果: {analysis_result}")
+        return analysis_result
+    except Exception as e:
+        print(f"⚠️ Robotics-ER解析エラー: {e}")
+        return ""
+
 # --- メイン処理関数 ---
 def process_request(user_text, image_path):
     """Gemini APIにリクエストを送信し、応答を音声で出力する."""
@@ -268,6 +298,16 @@ def process_request(user_text, image_path):
         full_prompt = user_input
 
     print(f"\n🧠 Geminiに送信: {user_input} (RAG付き: {bool(rag_content)})")
+
+    # Robotics-ERモデルで画像を解析（画像がある場合）
+    robotics_analysis = ""
+    if image:
+        robotics_analysis = analyze_image_with_robotics_er(image)
+    
+    # プロンプトにRobotics-ERの解析結果を追加
+    if robotics_analysis:
+        full_prompt = f"{full_prompt}\n\n//Robotics-ER Vision Analysis//\n{robotics_analysis}"
+        print(f"✅ Robotics-ER解析結果をプロンプトに統合しました")
 
     # マルチモーダルコンテンツリスト
     contents = [full_prompt]
