@@ -1,6 +1,7 @@
 import os
 import subprocess
 import time
+import threading
 import numpy as np
 
 from dotenv import load_dotenv
@@ -33,6 +34,8 @@ MODEL_NAME = "gemini-flash-lite-latest"
 gemini_model = genai.GenerativeModel(MODEL_NAME)
 
 # Whisper設定
+# tiny, base, small, medium, largeから選択（baseは日本語認識がより良い）
+# Whisper設定
 # tiny, base, small, medium, largeから選択
 WHISPER_MODEL = WhisperModel("tiny", device="cpu", compute_type="int8")
 SAMPLE_RATE = 44100  # ハードウェアでサポートされているレート
@@ -58,6 +61,7 @@ CORS(app)
 # グローバル変数（音声認識制御用）
 recognition_active = False
 audio_stream = None
+recognition_lock = threading.Lock()
 
 # --- AquesTalkPi 音声合成関数 ---
 def speak(text):
@@ -129,16 +133,29 @@ def process_request(user_text, image_path):
         print("画像ファイルが見つからないか、読み込めません。テキストのみで送信します。")
         image = None
 
-    # プロンプトを構築
-    # ここにRAG.txtの内容などの事前プロンプトがあれば追加する
+    # RAG.txtの内容を読み込み
+    rag_content = ""
+    try:
+        with open("/home/pi/pivot/RAG.txt", 'r', encoding='utf-8') as f:
+            rag_content = f.read()
+        print("📚 RAG.txtを読み込みました")
+    except Exception as e:
+        print(f"⚠️ RAG.txt読み込みエラー: {e}")
+        rag_content = ""
     
-    # ユーザー入力が空の場合、デフォルトのプロンプトを使用
+    # プロンプトを構築（RAG.txt + ユーザー入力）
     if not user_text.strip():
-        full_prompt = DEFAULT_PROMPT
+        user_input = DEFAULT_PROMPT
     else:
-        full_prompt = user_text
+        user_input = user_text
+    
+    # RAG.txtの内容を前置してプロンプトを作成
+    if rag_content:
+        full_prompt = f"{rag_content}\n\n//What users say//\n{user_input}"
+    else:
+        full_prompt = user_input
 
-    print(f"\n🧠 Geminiに送信: {full_prompt}")
+    print(f"\n🧠 Geminiに送信: {user_input} (RAG付き: {bool(rag_content)})")
 
     # マルチモーダルコンテンツリスト
     contents = [full_prompt]
@@ -151,38 +168,55 @@ def process_request(user_text, image_path):
         ai_response = response.text
         print(f"🤖 AI応答: {ai_response}")
         speak(ai_response) # 音声で読み上げ
+        return {"status": "success", "ai_response": ai_response}
     except Exception as e:
         error_message = f"Gemini APIエラー: {e}"
         print(error_message)
         speak("ごめんなさい。AIとの通信に失敗しました。")
+        return {"status": "error", "ai_response": "AIとの通信に失敗しました。"}
 
 
 # --- HTTP エンドポイント ---
 @app.route('/clicked', methods=['POST'])
 def handle_click():
     """HTTPでPOSTリクエストを受け取ると音声認識を開始"""
-    global recognition_active
-    
+    global recognition_active, recognition_lock
+
+    # 同時実行を防止: 認識中は追加リクエストを無視する
+    with recognition_lock:
+        if recognition_active:
+            print("⚠️ 既に音声認識中のためリクエストを無視します。")
+            return jsonify({
+                "status": "ignored",
+                "message": "現在音声認識中です。後で試してください。",
+                "transcript": "",
+                "ai_response": ""
+            }), 200
+        # 認識を開始するフラグを立てる
+        recognition_active = True
+
     try:
         print("🌐 HTTPリクエストを受信しました！音声認識を開始します...")
-        
-        # 音声認識開始
-        recognition_active = True
         result = start_voice_recognition()
-        
+
         return jsonify({
             "status": "success",
             "message": "音声認識完了",
             "transcript": result.get("transcript", ""),
             "ai_response": result.get("ai_response", "")
         })
-    
+
     except Exception as e:
         print(f"エラー: {e}")
         return jsonify({
-            "status": "error", 
+            "status": "error",
             "message": str(e)
         }), 500
+
+    finally:
+        # 認識フラグを必ずクリアする
+        with recognition_lock:
+            recognition_active = False
 
 def start_voice_recognition():
     """Whisperを使って音声認識を実行してAI応答まで処理"""
@@ -191,11 +225,11 @@ def start_voice_recognition():
     if not audio_stream:
         raise Exception("オーディオシステムが初期化されていません")
     
-    print("🎙️  何かお話しください... (5秒間録音)")
+    print(f"🎙️  何かお話しください... (7秒間録音, {SAMPLE_RATE}Hz)")
     
     # 音声データを収集
     frames = []
-    recording_duration = 5  # 5秒間録音
+    recording_duration = 7  # 7秒間録音（長めに設定）
     total_frames = int(SAMPLE_RATE / CHUNK_SIZE * recording_duration)
     
     try:
@@ -214,19 +248,39 @@ def start_voice_recognition():
     # 音声データをnumpy配列に変換
     audio_data = np.frombuffer(b''.join(frames), dtype=np.int16)
     
-    # 音声強化
-    enhanced_audio = enhance_audio(audio_data, SAMPLE_RATE, gain=2.0)
+    # 音声レベルチェック
+    audio_max = np.max(np.abs(audio_data))
+    audio_mean = np.mean(np.abs(audio_data))
+    print(f"📊 音声レベル - 最大: {audio_max}, 平均: {audio_mean:.1f}")
+    
+    if audio_max < 100:
+        print("⚠️ 音声レベルが非常に低いです。マイクの音量を確認してください。")
+    
+    # 音声強化（ゲインを上げる）
+    enhanced_audio = enhance_audio(audio_data, SAMPLE_RATE, gain=5.0)
     
     # float32に正規化（Whisperの入力形式）
     audio_float = enhanced_audio.astype(np.float32) / 32768.0
     
     try:
-        # Whisperで音声認識
-        segments, info = WHISPER_MODEL.transcribe(audio_float, beam_size=5, language="ja")
+        # Whisperで音声認識（日本語特化パラメータ）
+        segments, info = WHISPER_MODEL.transcribe(
+            audio_float, 
+            beam_size=5, 
+            language="ja",
+            condition_on_previous_text=False,  # 前のテキストに依存しない
+            temperature=0.0,  # 確定的な結果
+            compression_ratio_threshold=2.4,  # 日本語用に調整
+            log_prob_threshold=-1.0,  # ログ確率閾値を下げる
+            no_speech_threshold=0.6  # 無音検出閾値を上げる
+        )
+        
+        print(f"🌐 検出言語: {info.language} (確率: {info.language_probability:.2f})")
         
         # 認識結果を取得
         user_transcript = ""
         for segment in segments:
+            print(f"📝 セグメント: '{segment.text}' (確率: {segment.avg_logprob:.2f})")
             user_transcript += segment.text + " "
         
         user_transcript = user_transcript.strip()
@@ -255,10 +309,12 @@ def start_voice_recognition():
             }
         else:
             print("⚠️ 発言が検出されませんでした。")
-            speak("聞き取れませんでした。")
+            print(f"🔍 デバッグ: 音声最大レベル={audio_max}, 平均レベル={audio_mean:.1f}")
+            print("💡 ヒント: マイクに近づいて、はっきりと話してください")
+            speak("聞き取れませんでした。もう少し大きな声でお話しください。")
             return {
                 "transcript": "",
-                "ai_response": "聞き取れませんでした。"
+                "ai_response": "聞き取れませんでした。もう少し大きな声でお話しください。"
             }
             
     except Exception as e:
