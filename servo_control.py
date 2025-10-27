@@ -3,9 +3,10 @@ PiVot Servo Control Extension
 サーボ制御とURL表示の機能を提供する拡張モジュール
 
 使用するハードウェア: SparkFun Pi Servo Hat
-- CH0: Z軸 (水平旋回: 0-180度 -> 1-512値)
-- CH1: X軸 (上下移動: 0-180度 -> 1-512値)
+- CH0: Z軸 (水平旋回: 0-180度)
+- CH1: X軸 (上下移動: 0-180度)
 - 周波数: 50Hz
+- I2C通信でPWM制御
 """
 
 import time
@@ -13,13 +14,17 @@ import subprocess
 import webbrowser
 import os
 
-# SparkFun Pi Servo Hat制御用のライブラリをインポート
+# SparkFun Pi Servo Hat制御用のライブラリをインポート (I2C通信)
 try:
-    import pi_servo_hat
+    import smbus2 as smbus
     SERVO_AVAILABLE = True
 except ImportError:
-    print("Warning: pi_servo_hat not found. Servo control will be simulated.")
-    SERVO_AVAILABLE = False
+    try:
+        import smbus
+        SERVO_AVAILABLE = True
+    except ImportError:
+        print("Warning: smbus/smbus2 not found. Servo control will be simulated.")
+        SERVO_AVAILABLE = False
 
 # QRコード生成用のライブラリをインポート
 try:
@@ -30,32 +35,56 @@ except ImportError:
     print("Warning: qrcode or PIL not found. QR code generation will be disabled.")
     QRCODE_AVAILABLE = False
 
+# I2C設定
+I2C_BUS = 1
+SERVO_HAT_ADDR = 0x40
+
 # サーボハットの初期化
 if SERVO_AVAILABLE:
     try:
-        # Initialize the servo hat library
-        pi_servo_hat.restart()
-        print("✅ SparkFun Pi Servo Hat initialized")
+        bus = smbus.SMBus(I2C_BUS)
+        # Initialize servo hat for 50Hz PWM
+        bus.write_byte_data(SERVO_HAT_ADDR, 0, 0x20)  # enables word writes
+        time.sleep(0.25)
+        bus.write_byte_data(SERVO_HAT_ADDR, 0, 0x10)  # enable Prescale change
+        time.sleep(0.25)
+        bus.write_byte_data(SERVO_HAT_ADDR, 0xfe, 0x79)  # Prescale for 50 Hz
+        bus.write_byte_data(SERVO_HAT_ADDR, 0, 0x20)  # enables word writes
+        time.sleep(0.25)
+        print("✅ SparkFun Pi Servo Hat initialized (50Hz via I2C)")
     except Exception as e:
         print(f"⚠️ Pi Servo Hat initialization failed: {e}")
         SERVO_AVAILABLE = False
+        bus = None
+else:
+    bus = None
 
-# チャンネル定義
-CHANNEL_Z = 0  # Z軸（水平旋回）
-CHANNEL_X = 1  # X軸（上下移動）
+# チャンネル定義とレジスタアドレス
+# CH0: レジスタ 0x06 (start), 0x08 (end)
+# CH1: レジスタ 0x0A (start), 0x0C (end)
+CHANNEL_REGISTERS = {
+    0: {'start': 0x06, 'end': 0x08},  # Z軸（水平旋回）
+    1: {'start': 0x0A, 'end': 0x0C},  # X軸（上下移動）
+}
 
 # 角度の範囲制限
 MIN_ANGLE = 0
 MAX_ANGLE = 180
 
-# サーボ値の範囲 (SparkFun Pi Servo Hat: 1-512)
-MIN_SERVO_VALUE = 1
-MAX_SERVO_VALUE = 512
+# PWM値の範囲 (50Hzでの実測値に基づく)
+# 0° = 209 (1.0ms), 90° = 416 (2.0ms), 180° = 623 (3.0ms)
+MIN_PWM_VALUE = 209  # 1.0ms pulse width
+MAX_PWM_VALUE = 623  # 3.0ms pulse width
 
 
-def angle_to_servo_value(angle):
+def angle_to_pwm_value(angle):
     """
-    角度（0-180度）をサーボ値（1-512）に変換
+    角度（0-180度）をPWM値に変換
+    
+    50HzのPWM信号で、サーボの制御パルス幅は：
+    - 0°: 1.0ms (PWM値 209)
+    - 90°: 2.0ms (PWM値 416)
+    - 180°: 3.0ms (PWM値 623)
     
     Parameters:
     -----------
@@ -65,12 +94,13 @@ def angle_to_servo_value(angle):
     Returns:
     --------
     int
-        サーボ値 (1-512)
+        PWM値 (209-623)
     """
-    # 0-180度を1-512にマッピング
-    servo_value = int(((angle / 180.0) * 511) + 1)
+    # 0-180度を209-623にマッピング
+    # 直線補間: pwm = 209 + (angle / 180) * (623 - 209)
+    pwm_value = int(MIN_PWM_VALUE + (angle / 180.0) * (MAX_PWM_VALUE - MIN_PWM_VALUE))
     # 範囲内に制限
-    return max(MIN_SERVO_VALUE, min(MAX_SERVO_VALUE, servo_value))
+    return max(MIN_PWM_VALUE, min(MAX_PWM_VALUE, pwm_value))
 
 
 def cam_move(shaft, angle):
@@ -104,34 +134,40 @@ def cam_move(shaft, angle):
     # 角度を範囲内に制限
     angle = max(MIN_ANGLE, min(MAX_ANGLE, float(angle)))
     
-    # 角度をサーボ値に変換
-    servo_value = angle_to_servo_value(angle)
+    # 角度をPWM値に変換
+    pwm_value = angle_to_pwm_value(angle)
     
     # チャンネル選択
     if shaft == 'z':
-        channel = CHANNEL_Z
+        channel = 0  # Z軸（水平旋回）
         axis_name = "Z軸（水平）"
     else:  # shaft == 'x'
-        channel = CHANNEL_X
+        channel = 1  # X軸（上下移動）
         axis_name = "X軸（上下）"
     
-    print(f"🎯 カメラ移動: {axis_name} CH{channel} -> {angle}度 (サーボ値: {servo_value})")
+    print(f"🎯 カメラ移動: {axis_name} CH{channel} -> {angle}度 (PWM値: {pwm_value})")
     
-    if SERVO_AVAILABLE:
+    if SERVO_AVAILABLE and bus is not None:
         try:
-            # SparkFun Pi Servo Hatのmove_servo_position関数を使用
-            # move_servo_position(channel, position)
-            # channel: 0-15, position: 1-512
-            pi_servo_hat.move_servo_position(channel, servo_value)
+            # I2C経由でPWM値を書き込む
+            regs = CHANNEL_REGISTERS[channel]
+            
+            # チャンネルの開始時間を0に設定
+            bus.write_word_data(SERVO_HAT_ADDR, regs['start'], 0)
+            time.sleep(0.05)
+            
+            # チャンネルの終了時間（PWM値）を設定
+            bus.write_word_data(SERVO_HAT_ADDR, regs['end'], pwm_value)
             time.sleep(0.1)  # サーボの動作を待つ
-            print(f"✅ サーボ移動完了: CH{channel} = {angle}度 (値: {servo_value})")
+            
+            print(f"✅ サーボ移動完了: CH{channel} = {angle}度 (PWM値: {pwm_value})")
             return True
         except Exception as e:
             print(f"❌ サーボ制御エラー: {e}")
             return False
     else:
         # シミュレーションモード
-        print(f"🔧 [SIMULATION] CH{channel} ({axis_name}) を {angle}度 (値: {servo_value}) に設定")
+        print(f"🔧 [SIMULATION] CH{channel} ({axis_name}) を {angle}度 (PWM値: {pwm_value}) に設定")
         return True
 
 
