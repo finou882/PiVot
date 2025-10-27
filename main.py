@@ -11,6 +11,9 @@ from flask_cors import CORS
 import google.generativeai as genai
 from PIL import Image
 
+# サーボ制御機能と応答解析をインポート
+from response_parser import extract_response_text, extract_code_blocks, execute_action_code
+
 # --- 音声処理ライブラリ ---
 import pyaudio
 from faster_whisper import WhisperModel
@@ -50,7 +53,9 @@ MICROPHONE_INDEX = 1  # 使用するマイクデバイスのインデックス�
 AQUESTALK_PATH = "/home/pi/pivot/aques/AquesTalkPi"
 
 # カメラ設定
-IMAGE_PATH = r"/home/pi/pivot/temp_capture.jpg" # 撮影した画像を保存する一時ファイル
+# スクリプトと同じディレクトリに一時画像を保存
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+IMAGE_PATH = os.path.join(SCRIPT_DIR, "temp_capture.jpg")
 DEFAULT_PROMPT = "この画像について何か尋ねていますか？"
 
 # --- Gemini チャットセッション（記憶保持用） ---
@@ -238,8 +243,12 @@ def process_request(user_text, image_path):
 
     # RAG.txtの内容を読み込み
     rag_content = ""
+    # スクリプトと同じディレクトリのRAG.txtを探す
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    rag_path = os.path.join(script_dir, "RAG.txt")
+    
     try:
-        with open("/home/pi/pivot/RAG.txt", 'r', encoding='utf-8') as f:
+        with open(rag_path, 'r', encoding='utf-8') as f:
             rag_content = f.read()
         print("📚 RAG.txtを読み込みました")
     except Exception as e:
@@ -271,6 +280,23 @@ def process_request(user_text, image_path):
         ai_response = response.text
         print(f"🤖 AI応答（生）: {ai_response}")
         
+        # <code>タグからアクションコードを抽出して実行
+        code_blocks = extract_code_blocks(ai_response)
+        if code_blocks:
+            print(f"📝 {len(code_blocks)}個のアクションコードを検出")
+            for i, code in enumerate(code_blocks, 1):
+                print(f"   アクション {i}: {code}")
+                execute_action_code(code)
+        
+        # <response>タグから音声出力用テキストを抽出
+        speech_text = extract_response_text(ai_response)
+        print(f"🗣️ 音声出力: {speech_text}")
+        
+        # 音声で読み上げ（タグを除去したテキスト）
+        if speech_text:
+            speak(speech_text)
+        
+        return {"status": "success", "ai_response": ai_response}
         # AI応答をパースする
         parsed = parse_ai_response(ai_response)
         
