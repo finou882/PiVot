@@ -3,12 +3,16 @@ import subprocess
 import time
 import threading
 import numpy as np
+import re
 
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import google.generativeai as genai
 from PIL import Image
+
+# サーボ制御機能をインポート
+from servo_control import cam_move, url
 
 # --- 音声処理ライブラリ ---
 import pyaudio
@@ -46,7 +50,9 @@ MICROPHONE_INDEX = 1  # 使用するマイクデバイスのインデックス�
 AQUESTALK_PATH = "/home/pi/pivot/aques/AquesTalkPi"
 
 # カメラ設定
-IMAGE_PATH = r"/home/pi/pivot/temp_capture.jpg" # 撮影した画像を保存する一時ファイル
+# スクリプトと同じディレクトリに一時画像を保存
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+IMAGE_PATH = os.path.join(SCRIPT_DIR, "temp_capture.jpg")
 DEFAULT_PROMPT = "この画像について何か尋ねていますか？"
 
 # --- Gemini チャットセッション（記憶保持用） ---
@@ -85,6 +91,67 @@ def speak(text):
         print(f"エラー: AquesTalkPiまたはaplayが見つかりません。パスを確認してください: {AQUESTALK_PATH}")
     except Exception as e:
         print(f"音声出力中にエラーが発生しました: {e}")
+
+# --- 応答解析関数 ---
+def extract_response_text(ai_response):
+    """
+    AI応答から<response>タグ内のテキストを抽出
+    タグがない場合は応答全体を返す
+    
+    Args:
+        ai_response (str): AIの生の応答
+    
+    Returns:
+        str: 音声出力用のテキスト
+    """
+    # <response>...</response> の内容を抽出
+    response_match = re.search(r'<response>(.*?)</response>', ai_response, re.DOTALL)
+    if response_match:
+        return response_match.group(1).strip()
+    
+    # タグがない場合は応答全体を返す（後方互換性）
+    return ai_response.strip()
+
+def extract_code_blocks(ai_response):
+    """
+    AI応答から<code>タグ内のコードを抽出
+    
+    Args:
+        ai_response (str): AIの生の応答
+    
+    Returns:
+        list: 抽出されたコードブロックのリスト
+    """
+    # <code>...</code> の内容をすべて抽出
+    code_blocks = re.findall(r'<code>(.*?)</code>', ai_response, re.DOTALL)
+    return [code.strip() for code in code_blocks]
+
+def execute_action_code(code_string):
+    """
+    抽出されたコードを安全に実行
+    
+    Args:
+        code_string (str): 実行するPythonコード
+    """
+    if not code_string:
+        return
+    
+    print(f"🎯 アクション実行: {code_string}")
+    
+    # 安全な実行環境を構築（許可された関数のみ）
+    safe_globals = {
+        'cam_move': cam_move,
+        'url': url,
+        '__builtins__': {},  # 組み込み関数を制限
+    }
+    
+    try:
+        # コードを実行
+        exec(code_string, safe_globals)
+        print("✅ アクション実行完了")
+    except Exception as e:
+        print(f"❌ アクション実行エラー: {e}")
+        print(f"   コード: {code_string}")
 
 # --- オーディオ処理関数 ---
 def enhance_audio(audio_data, sample_rate=44100, gain=2.0):
@@ -135,8 +202,12 @@ def process_request(user_text, image_path):
 
     # RAG.txtの内容を読み込み
     rag_content = ""
+    # スクリプトと同じディレクトリのRAG.txtを探す
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    rag_path = os.path.join(script_dir, "RAG.txt")
+    
     try:
-        with open("/home/pi/pivot/RAG.txt", 'r', encoding='utf-8') as f:
+        with open(rag_path, 'r', encoding='utf-8') as f:
             rag_content = f.read()
         print("📚 RAG.txtを読み込みました")
     except Exception as e:
@@ -166,8 +237,24 @@ def process_request(user_text, image_path):
     try:
         response = CHAT.send_message(contents)
         ai_response = response.text
-        print(f"🤖 AI応答: {ai_response}")
-        speak(ai_response) # 音声で読み上げ
+        print(f"🤖 AI応答（生）: {ai_response}")
+        
+        # <code>タグからアクションコードを抽出して実行
+        code_blocks = extract_code_blocks(ai_response)
+        if code_blocks:
+            print(f"📝 {len(code_blocks)}個のアクションコードを検出")
+            for i, code in enumerate(code_blocks, 1):
+                print(f"   アクション {i}: {code}")
+                execute_action_code(code)
+        
+        # <response>タグから音声出力用テキストを抽出
+        speech_text = extract_response_text(ai_response)
+        print(f"🗣️ 音声出力: {speech_text}")
+        
+        # 音声で読み上げ（タグを除去したテキスト）
+        if speech_text:
+            speak(speech_text)
+        
         return {"status": "success", "ai_response": ai_response}
     except Exception as e:
         error_message = f"Gemini APIエラー: {e}"

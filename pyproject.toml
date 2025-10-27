@@ -17,5 +17,6 @@ dependencies = [
     "pyaudio>=0.2.14",
     "pydub>=0.25.1",
     "python-dotenv>=1.1.1",
+    "qrcode[pil]>=8.0",
     "scipy>=1.13.1",
 ]
