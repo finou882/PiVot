@@ -11,6 +11,7 @@ PiVot Servo Control Extension
 import time
 import subprocess
 import webbrowser
+import os
 
 # Pi Servo Hat制御用のライブラリをインポート
 try:
@@ -20,6 +21,15 @@ try:
 except ImportError:
     print("Warning: RPi.GPIO or adafruit_servokit not found. Servo control will be simulated.")
     SERVO_AVAILABLE = False
+
+# QRコード生成用のライブラリをインポート
+try:
+    import qrcode
+    from PIL import Image
+    QRCODE_AVAILABLE = True
+except ImportError:
+    print("Warning: qrcode or PIL not found. QR code generation will be disabled.")
+    QRCODE_AVAILABLE = False
 
 # サーボキットの初期化 (16チャンネル, 50Hz)
 if SERVO_AVAILABLE:
@@ -118,10 +128,7 @@ def url(url_string):
     
     try:
         # QRコード生成（qrcodeライブラリを使用）
-        try:
-            import qrcode
-            from PIL import Image
-            
+        if QRCODE_AVAILABLE:
             # QRコードを生成
             qr = qrcode.QRCode(
                 version=1,
@@ -132,9 +139,15 @@ def url(url_string):
             qr.add_data(url_string)
             qr.make(fit=True)
             
-            # 画像として保存
+            # 画像として保存（セキュアなパスを使用）
             img = qr.make_image(fill_color="black", back_color="white")
             qr_path = "/tmp/qrcode.png"
+            
+            # パスの検証（セキュリティ対策）
+            qr_path = os.path.abspath(qr_path)
+            if not qr_path.startswith("/tmp/"):
+                raise ValueError("Invalid file path")
+            
             img.save(qr_path)
             
             print(f"✅ QRコードを生成しました: {qr_path}")
@@ -142,7 +155,9 @@ def url(url_string):
             # 画像を表示（Raspberry Piのディスプレイに表示する場合）
             # fbiやfehなどのイメージビューアを使用
             try:
-                subprocess.run(['feh', '--fullscreen', qr_path], check=False)
+                # セキュリティ: パスを検証してからsubprocessを実行
+                if os.path.exists(qr_path) and qr_path.startswith("/tmp/"):
+                    subprocess.run(['feh', '--fullscreen', qr_path], check=False, timeout=5)
             except FileNotFoundError:
                 print("⚠️ 画像表示ツール(feh)が見つかりません")
                 # 代替: ブラウザでURLを開く
@@ -151,10 +166,12 @@ def url(url_string):
                     print(f"✅ ブラウザでURLを開きました: {url_string}")
                 except Exception as e:
                     print(f"⚠️ ブラウザを開けませんでした: {e}")
+            except subprocess.TimeoutExpired:
+                print("⚠️ 画像表示がタイムアウトしました")
             
             return True
             
-        except ImportError:
+        else:
             print("⚠️ qrcodeライブラリが見つかりません")
             # QRコードが生成できない場合は、URLを表示するだけ
             print(f"📱 URL: {url_string}")

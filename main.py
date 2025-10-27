@@ -188,6 +188,25 @@ def execute_ai_code(code_string):
     
     print(f"🔧 コード実行: {code_string}")
     
+    # セキュリティ: コードの検証
+    # 許可された関数呼び出しのみを実行
+    allowed_patterns = [
+        r"cam_move\s*\(\s*shaft\s*=\s*['\"](?:x|z)['\"]\s*,\s*angle\s*=\s*\d+(?:\.\d+)?\s*\)",
+        r"url\s*\(\s*['\"]https?://[^'\"]+['\"]\s*\)"
+    ]
+    
+    # コードを行ごとに分割して検証
+    lines = [line.strip() for line in code_string.split('\n') if line.strip()]
+    for line in lines:
+        valid = False
+        for pattern in allowed_patterns:
+            if re.match(pattern, line):
+                valid = True
+                break
+        if not valid:
+            print(f"❌ セキュリティエラー: 許可されていないコード: {line}")
+            return False
+    
     # 安全な実行環境を準備
     # cam_move と url 関数のみを許可
     allowed_globals = {
