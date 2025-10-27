@@ -2,9 +2,9 @@
 PiVot Servo Control Extension
 サーボ制御とURL表示の機能を提供する拡張モジュール
 
-使用するハードウェア: Pi Servo Hat
-- CH0: Z軸 (水平旋回: 0-180度)
-- CH1: X軸 (上下移動: 0-180度)
+使用するハードウェア: SparkFun Pi Servo Hat
+- CH0: Z軸 (水平旋回: 0-180度 -> 1-512値)
+- CH1: X軸 (上下移動: 0-180度 -> 1-512値)
 - 周波数: 50Hz
 """
 
@@ -13,13 +13,12 @@ import subprocess
 import webbrowser
 import os
 
-# Pi Servo Hat制御用のライブラリをインポート
+# SparkFun Pi Servo Hat制御用のライブラリをインポート
 try:
-    import RPi.GPIO as GPIO
-    from adafruit_servokit import ServoKit
+    import pi_servo_hat
     SERVO_AVAILABLE = True
 except ImportError:
-    print("Warning: RPi.GPIO or adafruit_servokit not found. Servo control will be simulated.")
+    print("Warning: pi_servo_hat not found. Servo control will be simulated.")
     SERVO_AVAILABLE = False
 
 # QRコード生成用のライブラリをインポート
@@ -31,13 +30,14 @@ except ImportError:
     print("Warning: qrcode or PIL not found. QR code generation will be disabled.")
     QRCODE_AVAILABLE = False
 
-# サーボキットの初期化 (16チャンネル, 50Hz)
+# サーボハットの初期化
 if SERVO_AVAILABLE:
     try:
-        kit = ServoKit(channels=16, frequency=50)
-        print("✅ ServoKit initialized (16 channels, 50Hz)")
+        # Initialize the servo hat library
+        pi_servo_hat.restart()
+        print("✅ SparkFun Pi Servo Hat initialized")
     except Exception as e:
-        print(f"⚠️ ServoKit initialization failed: {e}")
+        print(f"⚠️ Pi Servo Hat initialization failed: {e}")
         SERVO_AVAILABLE = False
 
 # チャンネル定義
@@ -47,6 +47,30 @@ CHANNEL_X = 1  # X軸（上下移動）
 # 角度の範囲制限
 MIN_ANGLE = 0
 MAX_ANGLE = 180
+
+# サーボ値の範囲 (SparkFun Pi Servo Hat: 1-512)
+MIN_SERVO_VALUE = 1
+MAX_SERVO_VALUE = 512
+
+
+def angle_to_servo_value(angle):
+    """
+    角度（0-180度）をサーボ値（1-512）に変換
+    
+    Parameters:
+    -----------
+    angle : float
+        角度 (0-180度)
+    
+    Returns:
+    --------
+    int
+        サーボ値 (1-512)
+    """
+    # 0-180度を1-512にマッピング
+    servo_value = int(((angle / 180.0) * 511) + 1)
+    # 範囲内に制限
+    return max(MIN_SERVO_VALUE, min(MAX_SERVO_VALUE, servo_value))
 
 
 def cam_move(shaft, angle):
@@ -80,6 +104,9 @@ def cam_move(shaft, angle):
     # 角度を範囲内に制限
     angle = max(MIN_ANGLE, min(MAX_ANGLE, float(angle)))
     
+    # 角度をサーボ値に変換
+    servo_value = angle_to_servo_value(angle)
+    
     # チャンネル選択
     if shaft == 'z':
         channel = CHANNEL_Z
@@ -88,20 +115,23 @@ def cam_move(shaft, angle):
         channel = CHANNEL_X
         axis_name = "X軸（上下）"
     
-    print(f"🎯 カメラ移動: {axis_name} CH{channel} -> {angle}度")
+    print(f"🎯 カメラ移動: {axis_name} CH{channel} -> {angle}度 (サーボ値: {servo_value})")
     
     if SERVO_AVAILABLE:
         try:
-            kit.servo[channel].angle = angle
+            # SparkFun Pi Servo Hatのmove_servo_position関数を使用
+            # move_servo_position(channel, position)
+            # channel: 0-15, position: 1-512
+            pi_servo_hat.move_servo_position(channel, servo_value)
             time.sleep(0.1)  # サーボの動作を待つ
-            print(f"✅ サーボ移動完了: CH{channel} = {angle}度")
+            print(f"✅ サーボ移動完了: CH{channel} = {angle}度 (値: {servo_value})")
             return True
         except Exception as e:
             print(f"❌ サーボ制御エラー: {e}")
             return False
     else:
         # シミュレーションモード
-        print(f"🔧 [SIMULATION] CH{channel} ({axis_name}) を {angle}度に設定")
+        print(f"🔧 [SIMULATION] CH{channel} ({axis_name}) を {angle}度 (値: {servo_value}) に設定")
         return True
 
 

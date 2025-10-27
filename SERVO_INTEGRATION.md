@@ -39,10 +39,11 @@ url("https://www.google.com")
 ```
 
 #### ハードウェア仕様
-- Pi Servo Hat
+- **SparkFun Pi Servo Hat**
 - CH0: Z軸（水平旋回: 0-180度）
 - CH1: X軸（上下移動: 0-180度）
 - 周波数: 50Hz
+- サーボ値: 1-512 (0-180度に対応)
 
 ### 2. AI応答パース機能
 
@@ -116,7 +117,7 @@ cam_move(shaft='x', angle=150)</code>
 ## 依存関係
 
 新たに追加された依存関係：
-- `adafruit-circuitpython-servokit`: サーボ制御用
+- `pi-servo-hat`: SparkFun Pi Servo Hat制御用
 - `qrcode`: QRコード生成用
 
 ## セキュリティ
@@ -133,11 +134,25 @@ cam_move(shaft='x', angle=150)</code>
 3. `/clicked`にPOSTリクエストを送信して音声認識を開始
 4. ユーザーの発話に基づいてAIが応答し、必要に応じてサーボを制御
 
+## 角度とサーボ値の対応
+
+SparkFun Pi Servo Hatは1-512の値で制御され、0-180度に対応します：
+
+| 角度 | サーボ値 |
+|------|---------|
+| 0°   | 1       |
+| 45°  | 128     |
+| 90°  | 256     |
+| 135° | 384     |
+| 180° | 512     |
+
+変換式: `servo_value = int((angle / 180.0) * 511 + 1)`
+
 ## トラブルシューティング
 
 ### サーボが動かない場合
-- Pi Servo Hatが正しく接続されているか確認
-- `adafruit-circuitpython-servokit`がインストールされているか確認
+- SparkFun Pi Servo Hatが正しく接続されているか確認
+- `pi-servo-hat`ライブラリがインストールされているか確認
 - ハードウェアがない場合、シミュレーションモードで動作します
 
 ### QRコードが表示されない場合
