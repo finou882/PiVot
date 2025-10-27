@@ -22,9 +22,6 @@ print("Test 1: モデル設定の確認")
 print("-" * 40)
 
 try:
-    # main.pyから設定を読み込む（実行はしない）
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("main_config", "main.py")
     # ファイルを読んでモデル名を確認
     with open('main.py', 'r') as f:
         content = f.read()
