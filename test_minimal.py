@@ -3,25 +3,14 @@
 サーボ制御とAI応答解析の最小テストスクリプト（依存関係なし）
 """
 
-import re
+import sys
+import os
 
-# main.pyから関数をコピー（テスト用）
-def extract_response_text(ai_response):
-    """
-    AI応答から<response>タグ内のテキストを抽出
-    タグがない場合は応答全体を返す
-    """
-    response_match = re.search(r'<response>(.*?)</response>', ai_response, re.DOTALL)
-    if response_match:
-        return response_match.group(1).strip()
-    return ai_response.strip()
+# モジュールのパスを追加
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-def extract_code_blocks(ai_response):
-    """
-    AI応答から<code>タグ内のコードを抽出
-    """
-    code_blocks = re.findall(r'<code>(.*?)</code>', ai_response, re.DOTALL)
-    return [code.strip() for code in code_blocks]
+# 共有ユーティリティモジュールから関数をインポート
+from response_parser import extract_response_text, extract_code_blocks
 
 def test_extract_response_text():
     """<response>タグからテキスト抽出のテスト"""

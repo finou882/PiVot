@@ -6,44 +6,12 @@ AI応答解析のデモスクリプト
 
 import sys
 import os
-import re
 
 # モジュールのパスを追加
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# servo_controlから関数をインポート
-from servo_control import cam_move, url
-
-def extract_response_text(ai_response):
-    """AI応答から<response>タグ内のテキストを抽出"""
-    response_match = re.search(r'<response>(.*?)</response>', ai_response, re.DOTALL)
-    if response_match:
-        return response_match.group(1).strip()
-    return ai_response.strip()
-
-def extract_code_blocks(ai_response):
-    """AI応答から<code>タグ内のコードを抽出"""
-    code_blocks = re.findall(r'<code>(.*?)</code>', ai_response, re.DOTALL)
-    return [code.strip() for code in code_blocks]
-
-def execute_action_code(code_string):
-    """抽出されたコードを安全に実行"""
-    if not code_string:
-        return
-    
-    print(f"🎯 アクション実行: {code_string}")
-    
-    safe_globals = {
-        'cam_move': cam_move,
-        'url': url,
-        '__builtins__': {},
-    }
-    
-    try:
-        exec(code_string, safe_globals)
-        print("✅ アクション実行完了\n")
-    except Exception as e:
-        print(f"❌ アクション実行エラー: {e}\n")
+# 共有ユーティリティモジュールから関数をインポート
+from response_parser import extract_response_text, extract_code_blocks, execute_action_code
 
 def demo_ai_responses():
     """AI応答のデモンストレーション"""

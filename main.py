@@ -3,7 +3,6 @@ import subprocess
 import time
 import threading
 import numpy as np
-import re
 
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
@@ -11,8 +10,8 @@ from flask_cors import CORS
 import google.generativeai as genai
 from PIL import Image
 
-# サーボ制御機能をインポート
-from servo_control import cam_move, url
+# サーボ制御機能と応答解析をインポート
+from response_parser import extract_response_text, extract_code_blocks, execute_action_code
 
 # --- 音声処理ライブラリ ---
 import pyaudio
@@ -91,67 +90,6 @@ def speak(text):
         print(f"エラー: AquesTalkPiまたはaplayが見つかりません。パスを確認してください: {AQUESTALK_PATH}")
     except Exception as e:
         print(f"音声出力中にエラーが発生しました: {e}")
-
-# --- 応答解析関数 ---
-def extract_response_text(ai_response):
-    """
-    AI応答から<response>タグ内のテキストを抽出
-    タグがない場合は応答全体を返す
-    
-    Args:
-        ai_response (str): AIの生の応答
-    
-    Returns:
-        str: 音声出力用のテキスト
-    """
-    # <response>...</response> の内容を抽出
-    response_match = re.search(r'<response>(.*?)</response>', ai_response, re.DOTALL)
-    if response_match:
-        return response_match.group(1).strip()
-    
-    # タグがない場合は応答全体を返す（後方互換性）
-    return ai_response.strip()
-
-def extract_code_blocks(ai_response):
-    """
-    AI応答から<code>タグ内のコードを抽出
-    
-    Args:
-        ai_response (str): AIの生の応答
-    
-    Returns:
-        list: 抽出されたコードブロックのリスト
-    """
-    # <code>...</code> の内容をすべて抽出
-    code_blocks = re.findall(r'<code>(.*?)</code>', ai_response, re.DOTALL)
-    return [code.strip() for code in code_blocks]
-
-def execute_action_code(code_string):
-    """
-    抽出されたコードを安全に実行
-    
-    Args:
-        code_string (str): 実行するPythonコード
-    """
-    if not code_string:
-        return
-    
-    print(f"🎯 アクション実行: {code_string}")
-    
-    # 安全な実行環境を構築（許可された関数のみ）
-    safe_globals = {
-        'cam_move': cam_move,
-        'url': url,
-        '__builtins__': {},  # 組み込み関数を制限
-    }
-    
-    try:
-        # コードを実行
-        exec(code_string, safe_globals)
-        print("✅ アクション実行完了")
-    except Exception as e:
-        print(f"❌ アクション実行エラー: {e}")
-        print(f"   コード: {code_string}")
 
 # --- オーディオ処理関数 ---
 def enhance_audio(audio_data, sample_rate=44100, gain=2.0):
