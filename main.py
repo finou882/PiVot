@@ -20,7 +20,7 @@ from faster_whisper import WhisperModel
 import wave
 
 # --- サーボ制御ライブラリ ---
-from servo_control import cam_move, url
+from servo_control import cam_move, url, init_gpio, cleanup_gpio
 
 # --- カメラライブラリ (picamera2を推奨) ---
 try:
@@ -78,11 +78,31 @@ recognition_lock = threading.Lock()
 # --- AquesTalkPi 音声合成関数 ---
 def speak(text):
     """AquesTalkPiを使ってテキストを音声に変換し、aplayで出力する."""
+    # XMLタグを除去して音声合成用のクリーンなテキストにする
+    clean_text = text
+    # <respose>タグを除去（スペルミス版）
+    clean_text = re.sub(r'</?respose>', '', clean_text)
+    # <response>タグを除去（正しいスペル版）
+    clean_text = re.sub(r'</?response>', '', clean_text)
+    # <code>タグを除去
+    clean_text = re.sub(r'</?code>', '', clean_text)
+    # その他のXMLタグも除去
+    clean_text = re.sub(r'<[^>]+>', '', clean_text)
+    # 余分な空白を除去
+    clean_text = clean_text.strip()
+    
+    print(f"🔊 音声合成テキスト（タグ除去後）: {clean_text}")
+    
+    # 空のテキストの場合は音声合成しない
+    if not clean_text:
+        print("⚠️ 音声合成するテキストが空です")
+        return
+    
     # コマンドインジェクションを防ぐため、subprocess.runを使用
     try:
         # AquesTalkPiコマンドとaplayコマンドをパイプで接続
         process = subprocess.Popen(
-            [AQUESTALK_PATH, text],
+            [AQUESTALK_PATH, clean_text],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
@@ -109,6 +129,62 @@ def enhance_audio(audio_data, sample_rate=44100, gain=2.0):
     except Exception as e:
         print(f"オーディオ強化エラー: {e}")
         return audio_data
+
+def check_repeated_words(text, threshold=3):
+    """
+    テキスト内で同じ語彙が連続して出現するかをチェック
+    
+    Args:
+        text (str): チェックするテキスト
+        threshold (int): 連続出現の閾値（デフォルト: 3）
+    
+    Returns:
+        bool: 同じ語彙がthreshold回以上連続している場合True
+    """
+    if not text or not text.strip():
+        return False
+    
+    # テキストを語彙に分割（スペースまたは句読点で区切る）
+    import re
+    words = re.findall(r'[ぁ-んァ-ヶー一-龠a-zA-Z0-9]+', text)
+    
+    if len(words) < threshold:
+        return False
+    
+    # 連続する同じ語彙をカウント
+    consecutive_count = 1
+    prev_word = words[0] if words else ""
+    
+    for word in words[1:]:
+        if word == prev_word:
+            consecutive_count += 1
+            if consecutive_count >= threshold:
+                print(f"🔄 同じ語彙の連続検出: '{word}' x {consecutive_count}")
+                return True
+        else:
+            consecutive_count = 1
+            prev_word = word
+    
+    return False
+
+def get_text_input():
+    """
+    コンソールからテキスト入力を取得
+    
+    Returns:
+        str: 入力されたテキスト
+    """
+    print("📝 テキスト入力モードに切り替えました。")
+    print("💡 メッセージを入力してEnterを押してください（'quit'で終了）:")
+    
+    try:
+        user_input = input("👤 > ")
+        if user_input.lower() in ['quit', 'exit', '終了', 'やめる']:
+            return ""
+        return user_input.strip()
+    except (KeyboardInterrupt, EOFError):
+        print("\n⚠️ 入力がキャンセルされました。")
+        return ""
 
 # --- カメラ撮影関数 ---
 def take_picture(path=IMAGE_PATH):
@@ -158,7 +234,12 @@ def parse_ai_response(response_text):
         'raw': response_text
     }
     
-    # <response>タグの抽出
+    # <respose>タグの抽出（スペルミス版）
+    respose_match = re.search(r'<respose>(.*?)</respose>', response_text, re.DOTALL)
+    if respose_match:
+        result['response'] = respose_match.group(1).strip()
+    
+    # <response>タグの抽出（正しいスペル版）
     response_match = re.search(r'<response>(.*?)</response>', response_text, re.DOTALL)
     if response_match:
         result['response'] = response_match.group(1).strip()
@@ -170,6 +251,7 @@ def parse_ai_response(response_text):
     
     # タグを除去した全文を取得
     raw_text = response_text
+    raw_text = re.sub(r'<respose>.*?</respose>', '', raw_text, flags=re.DOTALL)
     raw_text = re.sub(r'<response>.*?</response>', '', raw_text, flags=re.DOTALL)
     raw_text = re.sub(r'<code>.*?</code>', '', raw_text, flags=re.DOTALL)
     result['raw'] = raw_text.strip()
@@ -326,14 +408,20 @@ def process_request(user_text, image_path):
             print(f"📝 {len(code_blocks)}個のアクションコードを検出")
             for i, code in enumerate(code_blocks, 1):
                 print(f"   アクション {i}: {code}")
+                print(f"🔧 アクションコード実行開始...")
                 execute_action_code(code)
+                print(f"✅ アクション {i} 実行完了")
+        else:
+            print("📝 <code>タグが見つかりません")
         
         # <response>タグから音声出力用テキストを抽出
         speech_text = extract_response_text(ai_response)
-        print(f"🗣️ 音声出力: {speech_text}")
+        print(f"🗣️ 元のAI応答: {ai_response}")
+        print(f"🗣️ 抽出された音声テキスト: {speech_text}")
         
         # 音声で読み上げ（タグを除去したテキスト）
         if speech_text:
+            print(f"🔊 音声合成開始: {speech_text}")
             speak(speech_text)
         
         return {"status": "success", "ai_response": ai_response}
@@ -403,6 +491,76 @@ def handle_click():
         # 認識フラグを必ずクリアする
         with recognition_lock:
             recognition_active = False
+
+@app.route('/text_input', methods=['POST'])
+def handle_text_input():
+    """HTTPでテキスト入力を受け取って処理"""
+    try:
+        # リクエストの詳細をログに出力
+        print(f"🌐 Content-Type: {request.headers.get('Content-Type')}")
+        print(f"🌐 Request Data: {request.data}")
+        
+        # JSONデータを取得
+        data = request.get_json(force=True)  # force=Trueを追加
+        print(f"🌐 Parsed JSON: {data}")
+        
+        if not data or 'text' not in data:
+            print("❌ JSONにtextフィールドがありません")
+            return jsonify({
+                "status": "error",
+                "message": "テキストが提供されていません。JSON形式で{\"text\": \"メッセージ\"}を送信してください。"
+            }), 400
+        
+        user_text = data['text'].strip()
+        if not user_text:
+            print("❌ テキストが空です")
+            return jsonify({
+                "status": "error", 
+                "message": "空のテキストです"
+            }), 400
+        
+        print(f"📝 テキスト入力受信: {user_text}")
+        
+        # 画像撮影
+        take_picture()
+        
+        # AI応答を生成
+        try:
+            response_data = process_request(user_text, IMAGE_PATH)
+            return jsonify({
+                "status": "success",
+                "message": "テキスト処理完了", 
+                "transcript": user_text,
+                "ai_response": response_data.get("ai_response", "")
+            })
+        except Exception as e:
+            print(f"AI処理エラー: {e}")
+            return jsonify({
+                "status": "error",
+                "message": f"AI処理エラー: {e}"
+            }), 500
+            
+    except ValueError as e:
+        print(f"❌ JSON解析エラー: {e}")
+        return jsonify({
+            "status": "error",
+            "message": f"JSON解析エラー: {str(e)}。正しいJSON形式で送信してください。"
+        }), 400
+    except Exception as e:
+        print(f"❌ テキスト入力エラー: {e}")
+        return jsonify({
+            "status": "error", 
+            "message": str(e)
+        }), 500
+
+@app.route('/text_input', methods=['GET'])
+def handle_text_input_get():
+    """テキスト入力エンドポイントのテスト用GET"""
+    return jsonify({
+        "status": "info",
+        "message": "テキスト入力エンドポイントです。POST方式で{\"text\": \"メッセージ\"}を送信してください。",
+        "example": "curl -X POST http://IPアドレス:8100/text_input -H \"Content-Type: application/json\" -d \"{\\\"text\\\": \\\"テストメッセージ\\\"}\""
+    })
 
 def start_voice_recognition():
     """Whisperを使って音声認識を実行してAI応答まで処理"""
@@ -474,6 +632,23 @@ def start_voice_recognition():
         if user_transcript:
             print(f"📝 認識結果: {user_transcript}")
             
+            # 同じ語彙の連続をチェック
+            if check_repeated_words(user_transcript, threshold=3):
+                print("🔄 同じ語彙が3回以上連続しています。テキスト入力モードに切り替えます。")
+                speak("同じ言葉が繰り返されています。テキスト入力モードに切り替えます。")
+                
+                # テキスト入力を取得
+                text_input = get_text_input()
+                if text_input:
+                    user_transcript = text_input
+                    print(f"📝 テキスト入力: {user_transcript}")
+                else:
+                    print("❌ テキスト入力がキャンセルされました。")
+                    return {
+                        "transcript": "",
+                        "ai_response": "テキスト入力がキャンセルされました。"
+                    }
+            
             # 画像撮影
             take_picture()
             
@@ -515,6 +690,12 @@ def start_voice_recognition():
 def main_loop():
     global audio_stream
     
+    # サーボ制御の初期化
+    if init_gpio():
+        print("✅ サーボ制御初期化成功")
+    else:
+        print("⚠️ サーボ制御初期化失敗 - シミュレーションモードで実行")
+    
     # PyAudio設定
     p = pyaudio.PyAudio()
     audio_stream = p.open(
@@ -528,16 +709,20 @@ def main_loop():
     
     print(f"\n🤖 Whisper音声認識システム起動")
     print(f"🎤 HTTPサーバー起動中...")
-    print(f"🌐 http://pi.local:8100/clicked にPOSTリクエストを送信してください")
+    print(f"🌐 音声認識: http://pi.local:8100/clicked にPOSTリクエスト")
+    print("📝 テキスト入力: http://pi.local:8100/text_input にJSON POST {\"text\": \"メッセージ\"}")
     
     # HTTPサーバーを起動
     try:
         app.run(host='0.0.0.0', port=8100, debug=False)
     finally:
         # クリーンアップ
+        print("🧹 システムクリーンアップ中...")
+        cleanup_gpio()
         audio_stream.stop_stream()
         audio_stream.close()
         p.terminate()
+        print("✅ クリーンアップ完了")
 
 
 

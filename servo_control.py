@@ -11,22 +11,29 @@ import time
 import subprocess
 import os
 
+# I2C通信でサーボハットを直接制御
+try:
+    import smbus
+    I2C_AVAILABLE = True
+    bus = smbus.SMBus(1)
+    addr = 0x40
+except ImportError:
+    I2C_AVAILABLE = False
+    print("警告: smbus ライブラリが見つかりません。サーボ制御はシミュレーションモードで動作します。")
+except Exception as e:
+    I2C_AVAILABLE = False
+    print(f"I2Cバス初期化エラー: {e}")
+
+# 従来のpi_servo_hatライブラリも試行
 try:
     from pi_servo_hat import PiServoHat
     PI_SERVO_HAT_AVAILABLE = True
+    servo_hat = None
 except ImportError:
     PI_SERVO_HAT_AVAILABLE = False
-    print("警告: pi_servo_hat ライブラリが見つかりません。サーボ制御はシミュレーションモードで動作します。")
 
-# サーボハットの初期化
-servo_hat = None
-if PI_SERVO_HAT_AVAILABLE:
-    try:
-        servo_hat = PiServoHat()
-        servo_hat.restart()
-    except Exception as e:
-        print(f"サーボハット初期化エラー: {e}")
-        PI_SERVO_HAT_AVAILABLE = False
+# サーボハット初期化フラグ
+servo_hat_initialized = False
 
 # サーボチャンネルマッピング
 SERVO_CHANNEL_Z = 0  # Z軸（水平旋回）はCH0
@@ -42,6 +49,28 @@ SERVO_MAX_ANGLE = 180
 SERVO_MIN_PULSE_WIDTH = 500   # マイクロ秒
 SERVO_MAX_PULSE_WIDTH = 2500  # マイクロ秒
 SERVO_FREQUENCY = 50  # Hz
+
+def init_servo_hat():
+    """サーボハットを初期化する"""
+    global servo_hat_initialized
+    if not I2C_AVAILABLE:
+        print("I2Cが利用できません。初期化をスキップします。")
+        return False
+    
+    try:
+        bus.write_byte_data(addr, 0, 0x20)  # enables word writes
+        time.sleep(.25)
+        bus.write_byte_data(addr, 0, 0x10)  # enable Prescale change as noted in the datasheet
+        time.sleep(.25)  # delay for reset
+        bus.write_byte_data(addr, 0xfe, 0x79)  # changes the Prescale register value for 50 Hz
+        bus.write_byte_data(addr, 0, 0x20)  # enables word writes
+        time.sleep(.25)
+        servo_hat_initialized = True
+        print("✅ サーボハット初期化完了")
+        return True
+    except Exception as e:
+        print(f"❌ サーボハット初期化エラー: {e}")
+        return False
 
 def angle_to_pulse_width(angle):
     """
@@ -59,6 +88,59 @@ def angle_to_pulse_width(angle):
     # 線形補間でパルス幅を計算
     pulse_width = SERVO_MIN_PULSE_WIDTH + (angle / 180.0) * (SERVO_MAX_PULSE_WIDTH - SERVO_MIN_PULSE_WIDTH)
     return int(pulse_width)
+
+def angle_to_pwm(angle):
+    """角度をPWM値に変換する（0-180度対応）"""
+    # MG996Rサーボの仕様: 0度=150, 90度=331, 180度=512
+    if angle < 0:
+        angle = 0
+    elif angle > 180:
+        angle = 180
+    
+    # 線形補間で計算: PWM値 = 150 + (角度 * (512-150) / 180)
+    pwm_value = int(150 + (angle * (512 - 150) / 180))
+    return pwm_value
+
+def move_servo_i2c(channel, angle):
+    """
+    I2C経由でサーボを指定した角度に移動する
+    
+    Args:
+        channel (int): サーボチャンネル (0-15)
+        angle (float): 目標角度 (0-180度)
+    """
+    global servo_hat_initialized
+    
+    if not I2C_AVAILABLE:
+        return False
+    
+    # 初期化チェック
+    if not servo_hat_initialized:
+        if not init_servo_hat():
+            return False
+    
+    if channel < 0 or channel > 15:
+        print(f"エラー: チャンネル {channel} は無効です。0-15の範囲で指定してください。")
+        return False
+    
+    try:
+        pwm_value = angle_to_pwm(angle)
+        
+        # チャンネルに対応するレジスタアドレスを計算
+        start_reg = 0x06 + (channel * 4)  # 開始時間レジスタ
+        end_reg = 0x08 + (channel * 4)    # 終了時間レジスタ
+        
+        # PWM設定
+        bus.write_word_data(addr, start_reg, 0)  # 開始時間 = 0us
+        time.sleep(0.01)
+        bus.write_word_data(addr, end_reg, pwm_value)  # 終了時間設定
+        
+        print(f"✅ チャンネル {channel}: {angle}度に移動 (PWM値: {pwm_value})")
+        time.sleep(0.5)  # サーボの動作完了を待つ
+        return True
+    except Exception as e:
+        print(f"❌ サーボ制御エラー (CH{channel}): {e}")
+        return False
 
 def cam_move(shaft='z', angle=90):
     """
@@ -88,80 +170,59 @@ def cam_move(shaft='z', angle=90):
         print(f"エラー: 無効な軸指定 '{shaft}'. 'x' または 'z' を指定してください。")
         return
     
-    # パルス幅を計算
-    pulse_width = angle_to_pulse_width(angle)
+    print(f"🎬 {axis_name} を {angle}度 に移動中... (CH{channel})")
     
-    print(f"🎬 {axis_name} を {angle}度 に移動中... (CH{channel}, PWM: {pulse_width}μs)")
+    # 方法1: I2C直接制御を試行
+    if move_servo_i2c(channel, angle):
+        print(f"✅ {axis_name} を {angle}度 に移動完了 (I2C制御)")
+        return
     
-    if PI_SERVO_HAT_AVAILABLE and servo_hat:
-        try:
-            # サーボを動かす
-            servo_hat.move_servo_position(channel, angle, 180)
-            time.sleep(0.5)  # サーボの移動を待つ
-            print(f"✅ {axis_name} を {angle}度 に移動完了")
-        except Exception as e:
-            print(f"サーボ制御エラー: {e}")
-    else:
-        # シミュレーションモード
-        print(f"[シミュレーション] {axis_name} を {angle}度 に移動")
-        time.sleep(0.3)
+    # 方法2: pi_servo_hatライブラリを試行
+    if PI_SERVO_HAT_AVAILABLE:
+        global servo_hat
+        if not servo_hat:
+            try:
+                servo_hat = PiServoHat()
+                servo_hat.restart()
+            except Exception as e:
+                print(f"pi_servo_hat初期化エラー: {e}")
+                servo_hat = None
+        
+        if servo_hat:
+            try:
+                servo_hat.move_servo_position(channel, angle, 180)
+                time.sleep(0.5)
+                print(f"✅ {axis_name} を {angle}度 に移動完了 (pi_servo_hat)")
+                return
+            except Exception as e:
+                print(f"pi_servo_hatエラー: {e}")
+    
+    # 方法3: シミュレーションモード
+    print(f"[シミュレーション] {axis_name} を {angle}度 に移動")
+    time.sleep(0.3)
 
 def url(url_string):
-    """
-    指定されたURLのQRコードを生成して表示
-    
-    Args:
-        url_string (str): QRコード化するURL
-    
-    Example:
-        url("https://www.google.com")
-    """
-    print(f"🔗 URLのQRコードを生成中: {url_string}")
-    
-    try:
-        # QRコード生成用のPythonライブラリ (qrcode) を使用
-        import qrcode
-        
-        # QRコードを生成
-        qr = qrcode.QRCode(
-            version=1,
-            error_correction=qrcode.constants.ERROR_CORRECT_L,
-            box_size=10,
-            border=4,
-        )
-        qr.add_data(url_string)
-        qr.make(fit=True)
-        
-        # 画像を作成
-        img = qr.make_image(fill_color="black", back_color="white")
-        
-        # QRコードを一時ファイルに保存
-        qr_path = "/tmp/qrcode.png"
-        img.save(qr_path)
-        print(f"✅ QRコードを生成し、{qr_path} に保存しました")
-        
-        # 画像ビューアで表示（例: fbi, feh, display など）
-        # Raspberry Pi の場合、fbi または feh を使用することが多い
-        try:
-            # fehを試す
-            subprocess.run(['feh', '--fullscreen', qr_path], check=True, timeout=5)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            try:
-                # displayを試す（ImageMagick）
-                subprocess.run(['display', qr_path], check=True, timeout=5)
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                print(f"画像ビューアが見つかりません。QRコードは {qr_path} に保存されています。")
-    
-    except ImportError:
-        print("エラー: qrcode ライブラリがインストールされていません。")
-        print("インストールするには: pip install qrcode[pil]")
-    except Exception as e:
-        print(f"QRコード生成エラー: {e}")
+    print("🔗 URLコマンド受信: 現在未実装 - URL:", url_string)
+
+# 初期化とクリーンアップ関数
+def init_gpio():
+    """GPIO初期化 (I2Cサーボハット用)"""
+    return init_servo_hat()
+
+def cleanup_gpio():
+    """GPIO クリーンアップ (将来の拡張用)"""
+    global servo_hat_initialized
+    servo_hat_initialized = False
+    print("🔧 GPIO クリーンアップ完了")
 
 # テスト用の関数
 def test_servos():
     """サーボのテスト動作"""
     print("=== サーボテスト開始 ===")
+    
+    # 初期化
+    print("🔧 サーボハット初期化中...")
+    init_servo_hat()
     
     # Z軸テスト
     print("\n--- Z軸（水平）テスト ---")

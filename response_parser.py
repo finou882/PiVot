@@ -17,15 +17,26 @@ def extract_response_text(ai_response):
         ai_response (str): AIの生の応答
     
     Returns:
-        str: 音声出力用のテキスト
+        str: 音声出力用のテキスト（タグ自体は除外）
     """
-    # <response>...</response> の内容を抽出
+    # <respose>...</respose> の内容のみを抽出（スペルミス版）
+    respose_match = re.search(r'<respose>(.*?)</respose>', ai_response, re.DOTALL)
+    if respose_match:
+        content = respose_match.group(1).strip()
+        print(f"🏷️ <respose>タグから抽出されたテキスト: {content}")
+        return content
+    
+    # <response>...</response> の内容のみを抽出（正しいスペル版）
     response_match = re.search(r'<response>(.*?)</response>', ai_response, re.DOTALL)
     if response_match:
-        return response_match.group(1).strip()
+        content = response_match.group(1).strip()
+        print(f"🏷️ <response>タグから抽出されたテキスト: {content}")
+        return content
     
     # タグがない場合は応答全体を返す（後方互換性）
-    return ai_response.strip()
+    clean_text = ai_response.strip()
+    print(f"🏷️ タグなしテキスト: {clean_text}")
+    return clean_text
 
 
 def extract_code_blocks(ai_response):
@@ -38,8 +49,16 @@ def extract_code_blocks(ai_response):
     Returns:
         list: 抽出されたコードブロックのリスト
     """
+    print(f"🔍 コードブロック抽出開始...")
+    print(f"🔍 AI応答全体: {ai_response}")
+    
     # <code>...</code> の内容をすべて抽出
     code_blocks = re.findall(r'<code>(.*?)</code>', ai_response, re.DOTALL)
+    
+    print(f"🔍 抽出されたコードブロック数: {len(code_blocks)}")
+    for i, code in enumerate(code_blocks, 1):
+        print(f"🔍 ブロック {i}: {code.strip()}")
+    
     return [code.strip() for code in code_blocks]
 
 
