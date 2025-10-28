@@ -4,6 +4,7 @@ import time
 import threading
 import numpy as np
 import re
+import platform
 
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
@@ -23,10 +24,21 @@ import wave
 from servo_control import cam_move, url, init_gpio, cleanup_gpio
 
 # --- カメラライブラリ (picamera2を推奨) ---
-try:
-    from picamera2 import Picamera2
-except ImportError:
-    print("Warning: picamera2 not found. Install it for camera functionality.")
+# プラットフォーム検出
+IS_WINDOWS = platform.system() == "Windows"
+IS_RASPBERRY_PI = os.path.exists('/opt/vc/bin/vcgencmd')
+
+if not IS_WINDOWS:
+    try:
+        from picamera2 import Picamera2
+        CAMERA_AVAILABLE = True
+        print("PiCamera2 imported successfully")
+    except ImportError:
+        CAMERA_AVAILABLE = False
+        print("Warning: picamera2 not found. Install it for camera functionality.")
+else:
+    CAMERA_AVAILABLE = False
+    print("Running on Windows - Camera functionality will be mocked")
 
 # --- 設定値 ---
 load_dotenv()
@@ -188,26 +200,47 @@ def get_text_input():
 
 # --- カメラ撮影関数 ---
 def take_picture(path=IMAGE_PATH):
-    """Raspberry Pi Camera V1 (Picamera2) で画像を撮影する."""
-    try:
-        # Picamera2のインスタンスを初期化
-        # V1カメラの解像度に合わせて設定を調整する必要があるかもしれません
-        picam2 = Picamera2()
-        config = picam2.create_still_configuration(main={"size": (640, 480)}) # V1カメラは最大5MP
-        picam2.configure(config)
-        picam2.start()
-        time.sleep(2) # オートフォーカスと露出調整を待つ
-        
-        picam2.capture_file(path)
-        picam2.stop()
-        print(f"📸 画像を撮影し、{path}に保存しました。")
-        return True
-    except NameError:
-        print("エラー: picamera2ライブラリが見つかりません。カメラ機能はスキップされます。")
+    """Raspberry Pi Camera V1 (Picamera2) で画像を撮影する（Windowsではモック）."""
+    
+    if IS_WINDOWS:
+        # Windows environment - generate mock image
+        print("Windows environment: Generating mock camera image...")
+        try:
+            # 640x480のテスト画像を生成
+            test_image = Image.new('RGB', (640, 480), color=(73, 109, 137))
+            # 簡単なテキストを追加
+            from PIL import ImageDraw
+            draw = ImageDraw.Draw(test_image)
+            draw.text((10, 10), f"Test Image - {time.strftime('%Y-%m-%d %H:%M:%S')}", fill=(255, 255, 255))
+            test_image.save(path)
+            print(f"Mock image generated and saved to {path}")
+            return True
+        except Exception as e:
+            print(f"Error generating mock image: {e}")
+            return False
+    
+    elif not CAMERA_AVAILABLE:
+        print("Error: picamera2 library not found. Camera functionality skipped.")
         return False
-    except Exception as e:
-        print(f"カメラ撮影中にエラーが発生しました: {e}")
-        return False
+    
+    else:
+        # Raspberry Pi環境での実際のカメラ撮影
+        try:
+            # Picamera2のインスタンスを初期化
+            # V1カメラの解像度に合わせて設定を調整する必要があるかもしれません
+            picam2 = Picamera2()
+            config = picam2.create_still_configuration(main={"size": (640, 480)}) # V1カメラは最大5MP
+            picam2.configure(config)
+            picam2.start()
+            time.sleep(2) # オートフォーカスと露出調整を待つ
+            
+            picam2.capture_file(path)
+            picam2.stop()
+            print(f"Image captured and saved to {path}")
+            return True
+        except Exception as e:
+            print(f"Error during camera capture: {e}")
+            return False
 
 # --- AI応答パース関数 ---
 def parse_ai_response(response_text):
