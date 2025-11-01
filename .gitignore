@@ -11,3 +11,4 @@ dist/
 build/
 temp_capture.jpg
 build/
+cam_env/

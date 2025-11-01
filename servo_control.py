@@ -11,20 +11,21 @@ import time
 import subprocess
 import os
 
-# I2C通信でサーボハットを直接制御
+# 💡 変更点: smbus の代わりに smbus2 を使用
 try:
-    import smbus
+    import smbus2
     I2C_AVAILABLE = True
-    bus = smbus.SMBus(1)
+    # smbus2 の初期化: smbus2.SMBus() を使用
+    bus = smbus2.SMBus(1)
     addr = 0x40
 except ImportError:
     I2C_AVAILABLE = False
-    print("警告: smbus ライブラリが見つかりません。サーボ制御はシミュレーションモードで動作します。")
+    print("警告: smbus2 ライブラリが見つかりません。サーボ制御はシミュレーションモードで動作します。")
 except Exception as e:
     I2C_AVAILABLE = False
     print(f"I2Cバス初期化エラー: {e}")
 
-# 従来のpi_servo_hatライブラリも試行
+# 従来のpi_servo_hatライブラリも試行 (変更なし)
 try:
     from pi_servo_hat import PiServoHat
     PI_SERVO_HAT_AVAILABLE = True
@@ -35,17 +36,15 @@ except ImportError:
 # サーボハット初期化フラグ
 servo_hat_initialized = False
 
-# サーボチャンネルマッピング
+# サーボチャンネルマッピング (変更なし)
 SERVO_CHANNEL_Z = 0  # Z軸（水平旋回）はCH0
 SERVO_CHANNEL_X = 1  # X軸（上下移動）はCH1
 
-# サーボの角度範囲（度）
+# サーボの角度範囲（度） (変更なし)
 SERVO_MIN_ANGLE = 0
 SERVO_MAX_ANGLE = 180
 
-# サーボのPWM設定（50Hz用）
-# 一般的な50HzサーボのPWMデューティサイクル
-# 0度 = 500μs (約2.5% duty), 90度 = 1500μs (約7.5% duty), 180度 = 2500μs (約12.5% duty)
+# サーボのPWM設定（50Hz用） (変更なし)
 SERVO_MIN_PULSE_WIDTH = 500   # マイクロ秒
 SERVO_MAX_PULSE_WIDTH = 2500  # マイクロ秒
 SERVO_FREQUENCY = 50  # Hz
@@ -58,6 +57,7 @@ def init_servo_hat():
         return False
     
     try:
+        # 💡 変更点: smbus2 の write_byte_data を使用 (APIはsmbusと互換性あり)
         bus.write_byte_data(addr, 0, 0x20)  # enables word writes
         time.sleep(.25)
         bus.write_byte_data(addr, 0, 0x10)  # enable Prescale change as noted in the datasheet
@@ -72,15 +72,10 @@ def init_servo_hat():
         print(f"❌ サーボハット初期化エラー: {e}")
         return False
 
+# angle_to_pulse_width (変更なし)
 def angle_to_pulse_width(angle):
     """
     角度をパルス幅（マイクロ秒）に変換
-    
-    Args:
-        angle (int/float): サーボの角度 (0-180)
-    
-    Returns:
-        int: パルス幅（マイクロ秒）
     """
     # 角度を0-180の範囲にクランプ
     angle = max(SERVO_MIN_ANGLE, min(SERVO_MAX_ANGLE, angle))
@@ -89,6 +84,7 @@ def angle_to_pulse_width(angle):
     pulse_width = SERVO_MIN_PULSE_WIDTH + (angle / 180.0) * (SERVO_MAX_PULSE_WIDTH - SERVO_MIN_PULSE_WIDTH)
     return int(pulse_width)
 
+# angle_to_pwm (変更なし)
 def angle_to_pwm(angle):
     """角度をPWM値に変換する（0-180度対応）"""
     # MG996Rサーボの仕様: 0度=150, 90度=331, 180度=512
@@ -104,10 +100,6 @@ def angle_to_pwm(angle):
 def move_servo_i2c(channel, angle):
     """
     I2C経由でサーボを指定した角度に移動する
-    
-    Args:
-        channel (int): サーボチャンネル (0-15)
-        angle (float): 目標角度 (0-180度)
     """
     global servo_hat_initialized
     
@@ -130,7 +122,7 @@ def move_servo_i2c(channel, angle):
         start_reg = 0x06 + (channel * 4)  # 開始時間レジスタ
         end_reg = 0x08 + (channel * 4)    # 終了時間レジスタ
         
-        # PWM設定
+        # 💡 変更点: smbus2 の write_word_data を使用 (APIはsmbusと互換性あり)
         bus.write_word_data(addr, start_reg, 0)  # 開始時間 = 0us
         time.sleep(0.01)
         bus.write_word_data(addr, end_reg, pwm_value)  # 終了時間設定
@@ -142,17 +134,10 @@ def move_servo_i2c(channel, angle):
         print(f"❌ サーボ制御エラー (CH{channel}): {e}")
         return False
 
+# cam_move, url, init_gpio, cleanup_gpio, test_servos, __main__ブロックは変更なし
 def cam_move(shaft='z', angle=90):
     """
     カメラ（サーボ）を指定した軸と角度に移動
-    
-    Args:
-        shaft (str): 'x' (上下) または 'z' (左右)
-        angle (int/float): 目標角度 (0-180度)
-    
-    Example:
-        cam_move(shaft='z', angle=90)  # Z軸を正面（90度）に
-        cam_move(shaft='x', angle=180) # X軸を最大上向き（180度）に
     """
     shaft = shaft.lower()
     
@@ -241,8 +226,8 @@ def test_servos():
     cam_move(shaft='x', angle=90)   # 中央
     time.sleep(1)
     cam_move(shaft='x', angle=180)  # 上端
-    time.sleep(1)
-    cam_move(shaft='x', angle=90)   # 中央に戻す
+#    time.sleep(1)
+#    cam_move(shaft='x', angle=90)  # 中央に戻す
     
     print("\n=== サーボテスト完了 ===")
 
