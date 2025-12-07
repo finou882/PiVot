@@ -1,0 +1,499 @@
+#!/usr/bin/env python3
+"""
+PiCamera2を使用した写真撮影とGemini AIによる画像分析スクリプト
+音声ウェイクワード検出機能付き
+"""
+
+from picamera2 import Picamera2
+from datetime import datetime
+import time
+import os
+from pathlib import Path
+import google.generativeai as genai
+from dotenv import load_dotenv
+from PIL import Image
+import soundfile as sf
+import warnings
+import os as _os
+import sounddevice as sd
+import librosa
+import numpy as np
+
+# ONNXRuntimeのGPU警告を抑制（ラズパイではGPUが利用できないため）
+_os.environ["ORT_DISABLE_ALL_PROVIDERS"] = "0"
+warnings.filterwarnings("ignore", category=UserWarning, module="onnxruntime")
+
+# USBマイクのネイティブサンプルレート（48000Hz）を使用
+sd.default.samplerate = 48000
+sd.default.channels = 1
+
+# .envファイルから環境変数を読み込む
+load_dotenv()
+
+# Gemini APIの設定
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel("gemini-2.0-flash")
+
+# ウェイクワードのリファレンスディレクトリ（16kHzにリサンプリング済み）
+VOICE_EXAMPLES_DIR = "./voice_examples_16k"
+WAKE_THRESHOLD = 0.04  # 検出閾値（小さいほど厳格、大きいほど緩い）
+RECORDING_DURATION = 5  # プロンプト録音時間（秒）
+REFERENCE_AUDIO_LENGTH = 2.5  # リファレンス音声の統一長（秒）
+RAG_PROMPT_FILE = "./rag_prompt.txt"  # RAGプロンプトファイル
+PHOTO_DIR = "./Past_Photo"  # 写真保存ディレクトリ
+
+
+def take_photo(filename=None):
+    """カメラで写真を撮影する
+    
+    Args:
+        filename: 保存するファイル名（省略時はタイムスタンプ付き）
+    
+    Returns:
+        str: 保存されたファイルのパス
+    """
+    # 保存ディレクトリを作成
+    os.makedirs(PHOTO_DIR, exist_ok=True)
+    
+    # カメラの初期化
+    picam2 = Picamera2()
+    
+    # カメラ設定
+    camera_config = picam2.create_still_configuration()
+    picam2.configure(camera_config)
+    
+    # カメラの起動
+    picam2.start()
+    
+    # カメラのウォームアップ（推奨）
+    time.sleep(2)
+    
+    # ファイル名にタイムスタンプを使用
+    if filename is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"photo_{timestamp}.jpg"
+    
+    # フルパスを作成
+    filepath = os.path.join(PHOTO_DIR, filename)
+    
+    # 写真を撮影
+    picam2.capture_file(filepath)
+    print(f"写真を保存しました: {filepath}")
+    
+    # カメラの停止
+    picam2.stop()
+    picam2.close()
+    
+    return filepath
+
+
+def load_rag_prompt():
+    """RAGプロンプトを読み込む
+    
+    Returns:
+        str: RAGプロンプト（存在しない場合は空文字列）
+    """
+    if os.path.exists(RAG_PROMPT_FILE):
+        with open(RAG_PROMPT_FILE, 'r', encoding='utf-8') as f:
+            rag_content = f.read().strip()
+            if rag_content:
+                print(f"RAGプロンプトを読み込みました（{len(rag_content)}文字）")
+                return rag_content
+    return ""
+
+
+def analyze_photo_with_gemini(image_path, prompt="この画像について詳しく説明してください。", use_rag=True):
+    """撮影した写真をGemini AIで分析する
+    
+    Args:
+        image_path: 分析する画像のパス
+        prompt: Geminiに送るプロンプト
+        use_rag: RAGプロンプトを使用するか
+    
+    Returns:
+        str: Geminiからの応答テキスト
+    """
+    # 画像を読み込む
+    image = Image.open(image_path)
+    
+    # RAGプロンプトを読み込む
+    rag_prompt = ""
+    if use_rag:
+        rag_prompt = load_rag_prompt()
+    
+    # プロンプトを構築
+    if rag_prompt:
+        full_prompt = f"""{rag_prompt}
+
+---
+
+ユーザーの質問: {prompt}"""
+    else:
+        full_prompt = prompt
+    
+    # Geminiで分析
+    print(f"\nGemini AIで画像を分析中...")
+    print(f"プロンプト: {prompt}")
+    if rag_prompt:
+        print(f"（RAGコンテキスト: {len(rag_prompt)}文字）")
+    
+    response = model.generate_content([full_prompt, image])
+    
+    return response.text
+
+
+def take_photo_and_analyze(prompt="この画像について詳しく説明してください。"):
+    """写真を撮影してGemini AIで分析する
+    
+    Args:
+        prompt: Geminiに送るプロンプト
+    """
+    print("=" * 50)
+    print("写真撮影とAI分析を開始します")
+    print("=" * 50)
+    
+    # 写真を撮影
+    photo_path = take_photo()
+    
+    # Geminiで分析
+    result = analyze_photo_with_gemini(photo_path, prompt)
+    
+    # 結果を表示
+    print("\n" + "=" * 50)
+    print("Gemini AIの分析結果:")
+    print("=" * 50)
+    print(result)
+    print("=" * 50)
+    
+    return photo_path, result
+
+
+def record_voice_prompt(duration=RECORDING_DURATION, existing_stream=None, use_vad=True):
+    """音声でプロンプトを録音する（音声検出で自動停止）
+    
+    Args:
+        duration: 最大録音時間（秒）
+        existing_stream: 既存の入力ストリーム（Noneの場合は新規作成）
+        use_vad: 音声検出を使用するか（True: 無音で自動停止, False: 固定時間録音）
+    
+    Returns:
+        str: 録音したファイルのパス
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"prompt_{timestamp}.wav"
+    
+    # 48kHzで録音
+    sample_rate_recording = 48000
+    
+    if use_vad:
+        print(f"\n音声を録音します（最大{duration}秒、無音で自動停止）...")
+        print("話し始めてください...")
+        
+        # 音声検出のパラメータ
+        silence_threshold = 0.01  # 無音判定の閾値（RMS）
+        silence_duration = 1.5    # この秒数無音が続いたら停止
+        min_duration = 0.5        # 最低録音時間（秒）
+        
+        audio_data = []
+        silent_samples = 0
+        silence_samples_needed = int(silence_duration * sample_rate_recording)
+        min_samples = int(min_duration * sample_rate_recording)
+        max_samples = int(duration * sample_rate_recording)
+        
+        chunk_size = 4800  # 0.1秒分
+        
+        if existing_stream is None:
+            print("エラー: 音声検出モードでは既存のストリームが必要です")
+            return None
+        
+        started = False
+        
+        while len(audio_data) < max_samples:
+            chunk, _ = existing_stream.read(chunk_size)
+            chunk_audio = chunk[:, 0]
+            audio_data.extend(chunk_audio)
+            
+            # RMS（音量）を計算
+            rms = np.sqrt(np.mean(chunk_audio ** 2))
+            
+            # 音声が開始されたかチェック
+            if not started and rms > silence_threshold:
+                started = True
+                print("🎤 録音中...", end='', flush=True)
+            
+            # 無音判定（音声開始後のみ）
+            if started:
+                if rms < silence_threshold:
+                    silent_samples += len(chunk_audio)
+                    # 進捗表示
+                    progress = int((silent_samples / silence_samples_needed) * 10)
+                    print(f"\r🎤 録音中... {'.' * progress}{' ' * (10 - progress)}", end='', flush=True)
+                else:
+                    silent_samples = 0
+                    print(f"\r🎤 録音中...          ", end='', flush=True)
+                
+                # 無音が続いたら停止（最低録音時間を超えている場合）
+                if silent_samples >= silence_samples_needed and len(audio_data) >= min_samples:
+                    print(f"\r✓ 無音を検出、録音終了（{len(audio_data) / sample_rate_recording:.1f}秒）")
+                    break
+        
+        audio = np.array(audio_data)
+    else:
+        print(f"\n{duration}秒間プロンプトを録音します...")
+        print("話し始めてください...")
+        
+        if existing_stream is not None:
+            # 既存のストリームから読み取る
+            samples_needed = int(duration * sample_rate_recording)
+            audio_data = []
+            
+            while len(audio_data) < samples_needed:
+                chunk, _ = existing_stream.read(min(12000, samples_needed - len(audio_data)))
+                audio_data.extend(chunk[:, 0])
+            
+            audio = np.array(audio_data[:samples_needed])
+        else:
+            # 新しいストリームを作成
+            audio = sd.rec(int(duration * sample_rate_recording), 
+                           samplerate=sample_rate_recording, 
+                           channels=1, 
+                           dtype='float32')
+            sd.wait()
+            audio = audio[:, 0]
+    
+    # 16kHzにリサンプリング
+    audio_16k = librosa.resample(audio, 
+                                  orig_sr=sample_rate_recording, 
+                                  target_sr=16000)
+    
+    # 保存
+    sf.write(filename, audio_16k, 16000)
+    
+    if not use_vad:
+        print(f"録音完了: {filename}")
+    return filename
+
+
+def speech_to_text_with_gemini(audio_path):
+    """音声ファイルをGeminiでテキストに変換する
+    
+    Args:
+        audio_path: 音声ファイルのパス
+    
+    Returns:
+        str: 変換されたテキスト
+    """
+    print("音声をテキストに変換中...")
+    
+    # Gemini APIで音声を処理
+    audio_file = genai.upload_file(path=audio_path)
+    response = model.generate_content([
+        "この音声を正確に文字起こししてください。テキストのみを返してください。",
+        audio_file
+    ])
+    
+    text = response.text.strip()
+    print(f"認識されたテキスト: {text}")
+    
+    # アップロードしたファイルを削除
+    audio_file.delete()
+    
+    return text
+
+
+def take_photo_and_analyze_with_voice():
+    """ウェイクワードを待機し、音声プロンプトで写真を撮影・分析する"""
+    import lwake.features as features
+    
+    print("=" * 50)
+    print("音声認識モードを開始します")
+    print(f"ウェイクワードを言ってください...")
+    print("=" * 50)
+    
+    # リファレンス音声を読み込む
+    print("リファレンス音声を読み込み中...")
+    reference_features = []
+    for i in range(1, 5):
+        ref_path = f"{VOICE_EXAMPLES_DIR}/Sample{i}.wav"
+        if os.path.exists(ref_path):
+            feat = features.extract_embedding_features(path=ref_path)
+            reference_features.append((f"Sample{i}.wav", feat))
+            print(f"  {ref_path} 読み込み完了")
+    
+    if not reference_features:
+        print("エラー: リファレンス音声が見つかりません")
+        return
+    
+    print(f"\n{len(reference_features)}個のリファレンス音声を読み込みました")
+    print(f"バッファサイズ: {REFERENCE_AUDIO_LENGTH + 0.5}秒")
+    print(f"閾値: {WAKE_THRESHOLD}")
+    print("\nウェイクワード検出を開始します...")
+    
+    # 録音パラメータ
+    recording_sr = 48000
+    target_sr = 16000
+    buffer_duration = REFERENCE_AUDIO_LENGTH + 0.5
+    slide_duration = 0.25
+    
+    buffer_samples = int(buffer_duration * recording_sr)
+    slide_samples = int(slide_duration * recording_sr)
+    
+    audio_buffer = np.zeros(buffer_samples, dtype=np.float32)
+    
+    try:
+        with sd.InputStream(samplerate=recording_sr, channels=1, dtype=np.float32) as stream:
+            while True:
+                # 音声を読み取る
+                data, overflowed = stream.read(slide_samples)
+                
+                chunk = data[:, 0]
+                
+                # バッファを更新
+                audio_buffer = np.roll(audio_buffer, -len(chunk))
+                audio_buffer[-len(chunk):] = chunk
+                
+                # 16kHzにリサンプリング
+                audio_16k = librosa.resample(audio_buffer, 
+                                             orig_sr=recording_sr, 
+                                             target_sr=target_sr)
+                
+                # 特徴抽出
+                try:
+                    feat = features.extract_embedding_features(y=audio_16k, sample_rate=target_sr)
+                except Exception as e:
+                    continue
+                
+                # リファレンスと比較
+                detected = False
+                min_distance = float('inf')
+                best_match = None
+                
+                for ref_name, ref_feat in reference_features:
+                    distance = features.dtw_cosine_normalized_distance(feat, ref_feat)
+                    
+                    if distance < min_distance:
+                        min_distance = distance
+                        best_match = ref_name
+                    
+                    if distance < WAKE_THRESHOLD:
+                        print(f"\n✓ ウェイクワード検出! ({ref_name}, 距離: {distance:.4f})")
+                        detected = True
+                        break
+                
+                # デバッグ: 最小距離を定期的に表示（10回に1回）
+                if not detected and np.random.random() < 0.1:
+                    print(f"  [デバッグ] 最小距離: {min_distance:.4f} ({best_match})", end='\r')
+                
+                if detected:
+                    # 音声プロンプトを録音（既存のストリームを使用）
+                    prompt_audio = record_voice_prompt(existing_stream=stream)
+                    
+                    # 音声をテキストに変換
+                    prompt_text = speech_to_text_with_gemini(prompt_audio)
+                    
+                    # 写真を撮影
+                    print("\n写真を撮影します...")
+                    photo_path = take_photo()
+                    
+                    # Geminiで分析
+                    result = analyze_photo_with_gemini(photo_path, prompt_text)
+                    
+                    # 結果を表示
+                    print("\n" + "=" * 50)
+                    print("Gemini AIの分析結果:")
+                    print("=" * 50)
+                    print(result)
+                    print("=" * 50)
+                    
+                    # 録音ファイルを削除
+                    os.remove(prompt_audio)
+                    
+                    # バッファをクリア
+                    audio_buffer = np.zeros(buffer_samples, dtype=np.float32)
+                    
+                    print(f"\n再度ウェイクワードを言ってください...")
+    
+    except KeyboardInterrupt:
+        print("\n\n音声認識を終了しました")
+    except Exception as e:
+        print(f"\nエラーが発生しました: {e}")
+        import traceback
+        traceback.print_exc()
+
+def take_multiple_photos(count=3, interval=2):
+    """複数枚の写真を連続撮影する
+    
+    Args:
+        count: 撮影枚数
+        interval: 撮影間隔（秒）
+    
+    Returns:
+        list: 保存されたファイルのパスのリスト
+    """
+    photo_paths = []
+    picam2 = Picamera2()
+    camera_config = picam2.create_still_configuration()
+    picam2.configure(camera_config)
+    picam2.start()
+    
+    time.sleep(2)  # ウォームアップ
+    
+    for i in range(count):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"photo_{timestamp}_{i+1}.jpg"
+        picam2.capture_file(filename)
+        photo_paths.append(filename)
+        print(f"写真 {i+1}/{count} を保存しました: {filename}")
+        
+        if i < count - 1:
+            time.sleep(interval)
+    
+    picam2.stop()
+    picam2.close()
+    
+    return photo_paths
+
+def take_photo_with_metadata():
+    """メタデータ付きで写真を撮影する"""
+    picam2 = Picamera2()
+    
+    # より詳細な設定
+    config = picam2.create_still_configuration(
+        main={"size": (1920, 1080)},  # 解像度の指定
+        lores={"size": (640, 480)},    # 低解像度プレビュー
+        display="lores"
+    )
+    picam2.configure(config)
+    picam2.start()
+    
+    time.sleep(2)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"photo_{timestamp}.jpg"
+    
+
+if __name__ == "__main__":
+    # デフォルトで音声認識モード
+    take_photo_and_analyze_with_voice()
+    
+    # 以下は使用例（コメントアウト）
+    # 基本的な使用例: 写真を撮影してAI分析
+    # take_photo_and_analyze("この画像について詳しく説明してください。")
+    
+    # カスタムプロンプトの例
+    # take_photo_and_analyze("この画像に写っているものを日本語でリストアップしてください。")
+    
+    # 写真のみ撮影する例
+    # photo_path = take_photo()
+    
+    # 既存の写真を分析する例
+    # result = analyze_photo_with_gemini("existing_photo.jpg", "この画像は何ですか？")
+    # print(result)
+    
+    # 複数枚撮影の例
+    # print("\n3枚の写真を連続撮影します...")
+    # take_multiple_photos(count=3, interval=2)
+    
+    # メタデータ付き撮影の例
+    # print("\nメタデータ付きで写真を撮影します...")
+    # take_photo_with_metadata()

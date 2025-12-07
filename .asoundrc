@@ -1,0 +1,15 @@
+# ALSA configuration for 16kHz resampling
+# USBマイクの48kHzを16kHzに自動リサンプリング
+
+pcm.lwake_mic {
+    type rate
+    slave {
+        pcm "hw:2,0"
+        rate 16000
+    }
+}
+
+ctl.lwake_mic {
+    type hw
+    card 2
+}
