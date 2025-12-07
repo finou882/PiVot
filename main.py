@@ -483,25 +483,28 @@ def take_multiple_photos(count: int = 3, interval: float = 2) -> List[str]:
     
     photo_paths = []
     picam2 = Picamera2()
-    camera_config = picam2.create_still_configuration()
-    picam2.configure(camera_config)
-    picam2.start()
     
-    time.sleep(2)  # ウォームアップ
-    
-    for i in range(count):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"photo_{timestamp}_{i+1}.jpg"
-        filepath = os.path.join(PHOTO_DIR, filename)
-        picam2.capture_file(filepath)
-        photo_paths.append(filepath)
-        print(f"写真 {i+1}/{count} を保存しました: {filepath}")
+    try:
+        camera_config = picam2.create_still_configuration()
+        picam2.configure(camera_config)
+        picam2.start()
         
-        if i < count - 1:
-            time.sleep(interval)
-    
-    picam2.stop()
-    picam2.close()
+        time.sleep(2)  # ウォームアップ
+        
+        for i in range(count):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"photo_{timestamp}_{i+1}.jpg"
+            filepath = os.path.join(PHOTO_DIR, filename)
+            picam2.capture_file(filepath)
+            photo_paths.append(filepath)
+            print(f"写真 {i+1}/{count} を保存しました: {filepath}")
+            
+            if i < count - 1:
+                time.sleep(interval)
+    finally:
+        # リソースの確実なクリーンアップ
+        picam2.stop()
+        picam2.close()
     
     return photo_paths
 
@@ -514,12 +517,12 @@ def take_photo_with_metadata() -> str:
     Raises:
         RuntimeError: カメラの初期化または撮影に失敗した場合
     """
+    # 保存ディレクトリを作成
+    os.makedirs(PHOTO_DIR, exist_ok=True)
+    
+    picam2 = Picamera2()
+    
     try:
-        # 保存ディレクトリを作成
-        os.makedirs(PHOTO_DIR, exist_ok=True)
-        
-        picam2 = Picamera2()
-        
         # より詳細な設定
         config = picam2.create_still_configuration(
             main={"size": (1920, 1080)},  # 解像度の指定
@@ -542,14 +545,14 @@ def take_photo_with_metadata() -> str:
         print(f"写真を保存しました: {filepath}")
         print(f"メタデータ: {metadata}")
         
-        # カメラの停止
-        picam2.stop()
-        picam2.close()
-        
         return filepath
     except Exception as e:
         print(f"エラー: 写真の撮影に失敗しました: {e}")
         raise RuntimeError(f"写真の撮影に失敗しました: {e}") from e
+    finally:
+        # リソースの確実なクリーンアップ
+        picam2.stop()
+        picam2.close()
 
 if __name__ == "__main__":
     # デフォルトで音声認識モード
