@@ -4,7 +4,7 @@ PiCamera2を使用した写真撮影とGemini AIによる画像分析スクリ�
 音声ウェイクワード検出機能付き
 """
 
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from picamera2 import Picamera2
 from datetime import datetime
 import time
@@ -18,6 +18,10 @@ import warnings
 import sounddevice as sd
 import librosa
 import numpy as np
+
+# 音声録音パラメータ（早期定義が必要）
+RECORDING_SAMPLE_RATE = 48000  # 録音時のサンプルレート（Hz）
+TARGET_SAMPLE_RATE = 16000  # 処理用サンプルレート（Hz）
 
 # ONNXRuntimeのGPU警告を抑制（ラズパイではGPUが利用できないため）
 os.environ["ORT_DISABLE_ALL_PROVIDERS"] = "0"
@@ -42,9 +46,7 @@ REFERENCE_AUDIO_LENGTH = 2.5  # リファレンス音声の統一長（秒）
 RAG_PROMPT_FILE = "./rag_prompt.txt"  # RAGプロンプトファイル
 PHOTO_DIR = "./Past_Photo"  # 写真保存ディレクトリ
 
-# 音声録音パラメータ
-RECORDING_SAMPLE_RATE = 48000  # 録音時のサンプルレート（Hz）
-TARGET_SAMPLE_RATE = 16000  # 処理用サンプルレート（Hz）
+# 音声検出パラメータ
 VAD_SILENCE_THRESHOLD = 0.01  # 無音判定の閾値（RMS）
 VAD_SILENCE_DURATION = 1.5  # この秒数無音が続いたら停止（秒）
 VAD_MIN_DURATION = 0.5  # 最低録音時間（秒）
@@ -169,14 +171,14 @@ def analyze_photo_with_gemini(image_path: str, prompt: str = "この画像につ
         raise RuntimeError(f"Gemini APIの呼び出しに失敗しました: {e}") from e
 
 
-def take_photo_and_analyze(prompt: str = "この画像について詳しく説明してください。") -> tuple[str, str]:
+def take_photo_and_analyze(prompt: str = "この画像について詳しく説明してください。") -> Tuple[str, str]:
     """写真を撮影してGemini AIで分析する
     
     Args:
         prompt: Geminiに送るプロンプト
         
     Returns:
-        tuple[str, str]: (写真のパス, 分析結果)
+        Tuple[str, str]: (写真のパス, 分析結果)
     """
     print("=" * 50)
     print("写真撮影とAI分析を開始します")
