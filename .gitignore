@@ -11,3 +11,9 @@ wheels/
 
 # Environment variables
 .env
+
+# Temporary audio files
+prompt_*.wav
+
+# Photo directory
+Past_Photo/

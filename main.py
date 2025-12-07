@@ -22,8 +22,8 @@ import numpy as np
 os.environ["ORT_DISABLE_ALL_PROVIDERS"] = "0"
 warnings.filterwarnings("ignore", category=UserWarning, module="onnxruntime")
 
-# USBマイクのネイティブサンプルレート（48000Hz）を使用
-sd.default.samplerate = 48000
+# USBマイクのネイティブサンプルレート設定
+sd.default.samplerate = RECORDING_SAMPLE_RATE
 sd.default.channels = 1
 
 # .envファイルから環境変数を読み込む
@@ -40,6 +40,14 @@ RECORDING_DURATION = 5  # プロンプト録音時間（秒）
 REFERENCE_AUDIO_LENGTH = 2.5  # リファレンス音声の統一長（秒）
 RAG_PROMPT_FILE = "./rag_prompt.txt"  # RAGプロンプトファイル
 PHOTO_DIR = "./Past_Photo"  # 写真保存ディレクトリ
+
+# 音声録音パラメータ
+RECORDING_SAMPLE_RATE = 48000  # 録音時のサンプルレート（Hz）
+TARGET_SAMPLE_RATE = 16000  # 処理用サンプルレート（Hz）
+VAD_SILENCE_THRESHOLD = 0.01  # 無音判定の閾値（RMS）
+VAD_SILENCE_DURATION = 1.5  # この秒数無音が続いたら停止（秒）
+VAD_MIN_DURATION = 0.5  # 最低録音時間（秒）
+VAD_CHUNK_SIZE = 4800  # 音声チャンクサイズ（サンプル数、約0.1秒分）
 
 
 def take_photo(filename=None):
@@ -195,30 +203,27 @@ def record_voice_prompt(duration=RECORDING_DURATION, existing_stream=None, use_v
         use_vad: 音声検出を使用するか（True: 無音で自動停止, False: 固定時間録音）
     
     Returns:
-        str: 録音したファイルのパス
+        str: 録音したファイルのパス、またはNone（エラーの場合）
+        
+    Raises:
+        ValueError: durationが無効な値の場合
     """
+    # 入力値の検証
+    if duration <= 0:
+        raise ValueError(f"durationは正の数である必要があります: {duration}")
+    
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"prompt_{timestamp}.wav"
-    
-    # 48kHzで録音
-    sample_rate_recording = 48000
     
     if use_vad:
         print(f"\n音声を録音します（最大{duration}秒、無音で自動停止）...")
         print("話し始めてください...")
         
-        # 音声検出のパラメータ
-        silence_threshold = 0.01  # 無音判定の閾値（RMS）
-        silence_duration = 1.5    # この秒数無音が続いたら停止
-        min_duration = 0.5        # 最低録音時間（秒）
-        
         audio_data = []
         silent_samples = 0
-        silence_samples_needed = int(silence_duration * sample_rate_recording)
-        min_samples = int(min_duration * sample_rate_recording)
-        max_samples = int(duration * sample_rate_recording)
-        
-        chunk_size = 4800  # 0.1秒分
+        silence_samples_needed = int(VAD_SILENCE_DURATION * RECORDING_SAMPLE_RATE)
+        min_samples = int(VAD_MIN_DURATION * RECORDING_SAMPLE_RATE)
+        max_samples = int(duration * RECORDING_SAMPLE_RATE)
         
         if existing_stream is None:
             print("エラー: 音声検出モードでは既存のストリームが必要です")
@@ -227,7 +232,7 @@ def record_voice_prompt(duration=RECORDING_DURATION, existing_stream=None, use_v
         started = False
         
         while len(audio_data) < max_samples:
-            chunk, _ = existing_stream.read(chunk_size)
+            chunk, _ = existing_stream.read(VAD_CHUNK_SIZE)
             chunk_audio = chunk[:, 0]
             audio_data.extend(chunk_audio)
             
@@ -235,13 +240,13 @@ def record_voice_prompt(duration=RECORDING_DURATION, existing_stream=None, use_v
             rms = np.sqrt(np.mean(chunk_audio ** 2))
             
             # 音声が開始されたかチェック
-            if not started and rms > silence_threshold:
+            if not started and rms > VAD_SILENCE_THRESHOLD:
                 started = True
                 print("🎤 録音中...", end='', flush=True)
             
             # 無音判定（音声開始後のみ）
             if started:
-                if rms < silence_threshold:
+                if rms < VAD_SILENCE_THRESHOLD:
                     silent_samples += len(chunk_audio)
                     # 進捗表示
                     progress = int((silent_samples / silence_samples_needed) * 10)
@@ -252,7 +257,7 @@ def record_voice_prompt(duration=RECORDING_DURATION, existing_stream=None, use_v
                 
                 # 無音が続いたら停止（最低録音時間を超えている場合）
                 if silent_samples >= silence_samples_needed and len(audio_data) >= min_samples:
-                    print(f"\r✓ 無音を検出、録音終了（{len(audio_data) / sample_rate_recording:.1f}秒）")
+                    print(f"\r✓ 無音を検出、録音終了（{len(audio_data) / RECORDING_SAMPLE_RATE:.1f}秒）")
                     break
         
         audio = np.array(audio_data)
@@ -262,7 +267,7 @@ def record_voice_prompt(duration=RECORDING_DURATION, existing_stream=None, use_v
         
         if existing_stream is not None:
             # 既存のストリームから読み取る
-            samples_needed = int(duration * sample_rate_recording)
+            samples_needed = int(duration * RECORDING_SAMPLE_RATE)
             audio_data = []
             
             while len(audio_data) < samples_needed:
@@ -272,8 +277,8 @@ def record_voice_prompt(duration=RECORDING_DURATION, existing_stream=None, use_v
             audio = np.array(audio_data[:samples_needed])
         else:
             # 新しいストリームを作成
-            audio = sd.rec(int(duration * sample_rate_recording), 
-                           samplerate=sample_rate_recording, 
+            audio = sd.rec(int(duration * RECORDING_SAMPLE_RATE), 
+                           samplerate=RECORDING_SAMPLE_RATE, 
                            channels=1, 
                            dtype='float32')
             sd.wait()
@@ -281,11 +286,11 @@ def record_voice_prompt(duration=RECORDING_DURATION, existing_stream=None, use_v
     
     # 16kHzにリサンプリング
     audio_16k = librosa.resample(audio, 
-                                  orig_sr=sample_rate_recording, 
-                                  target_sr=16000)
+                                  orig_sr=RECORDING_SAMPLE_RATE, 
+                                  target_sr=TARGET_SAMPLE_RATE)
     
     # 保存
-    sf.write(filename, audio_16k, 16000)
+    sf.write(filename, audio_16k, TARGET_SAMPLE_RATE)
     
     if not use_vad:
         print(f"録音完了: {filename}")
@@ -360,18 +365,16 @@ def take_photo_and_analyze_with_voice():
     print("\nウェイクワード検出を開始します...")
     
     # 録音パラメータ
-    recording_sr = 48000
-    target_sr = 16000
     buffer_duration = REFERENCE_AUDIO_LENGTH + 0.5
     slide_duration = 0.25
     
-    buffer_samples = int(buffer_duration * recording_sr)
-    slide_samples = int(slide_duration * recording_sr)
+    buffer_samples = int(buffer_duration * RECORDING_SAMPLE_RATE)
+    slide_samples = int(slide_duration * RECORDING_SAMPLE_RATE)
     
     audio_buffer = np.zeros(buffer_samples, dtype=np.float32)
     
     try:
-        with sd.InputStream(samplerate=recording_sr, channels=1, dtype=np.float32) as stream:
+        with sd.InputStream(samplerate=RECORDING_SAMPLE_RATE, channels=1, dtype=np.float32) as stream:
             while True:
                 # 音声を読み取る
                 data, overflowed = stream.read(slide_samples)
@@ -384,12 +387,12 @@ def take_photo_and_analyze_with_voice():
                 
                 # 16kHzにリサンプリング
                 audio_16k = librosa.resample(audio_buffer, 
-                                             orig_sr=recording_sr, 
-                                             target_sr=target_sr)
+                                             orig_sr=RECORDING_SAMPLE_RATE, 
+                                             target_sr=TARGET_SAMPLE_RATE)
                 
                 # 特徴抽出
                 try:
-                    feat = features.extract_embedding_features(y=audio_16k, sample_rate=target_sr)
+                    feat = features.extract_embedding_features(y=audio_16k, sample_rate=TARGET_SAMPLE_RATE)
                 except Exception as e:
                     continue
                 
@@ -459,7 +462,16 @@ def take_multiple_photos(count=3, interval=2):
     
     Returns:
         list: 保存されたファイルのパスのリスト
+        
+    Raises:
+        ValueError: countまたはintervalが無効な値の場合
     """
+    # 入力値の検証
+    if count <= 0:
+        raise ValueError(f"countは正の整数である必要があります: {count}")
+    if interval < 0:
+        raise ValueError(f"intervalは0以上である必要があります: {interval}")
+    
     # 保存ディレクトリを作成
     os.makedirs(PHOTO_DIR, exist_ok=True)
     
