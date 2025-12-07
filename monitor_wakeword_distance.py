@@ -4,6 +4,7 @@
 適切な閾値を見つけるために使用
 """
 
+from typing import List, Tuple
 import sounddevice as sd
 import librosa
 import numpy as np
@@ -20,7 +21,8 @@ TARGET_SR = 16000
 BUFFER_DURATION = 3.0  # 秒
 SLIDE_DURATION = 0.25  # 秒
 
-def main():
+def main() -> None:
+    """メイン処理"""
     print("=" * 60)
     print("ウェイクワード距離モニター")
     print("=" * 60)

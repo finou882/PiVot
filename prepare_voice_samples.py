@@ -5,6 +5,7 @@
 - 指定の長さに統一（末尾に無音をパディング）
 """
 
+from typing import Optional
 import soundfile as sf
 import librosa
 import numpy as np
@@ -17,7 +18,7 @@ OUTPUT_DIR = "voice_examples_16k"
 TARGET_SAMPLE_RATE = 16000
 TARGET_DURATION = 2.5  # 秒
 
-def prepare_sample(input_file, output_file, target_sr=16000, target_duration=2.5):
+def prepare_sample(input_file: str, output_file: str, target_sr: int = 16000, target_duration: float = 2.5) -> None:
     """音声サンプルを処理する
     
     Args:
@@ -63,7 +64,7 @@ def prepare_sample(input_file, output_file, target_sr=16000, target_duration=2.5
         print(f"エラー: 音声サンプルの処理に失敗しました: {e}")
         raise RuntimeError(f"音声サンプルの処理に失敗しました: {e}") from e
 
-def main():
+def main() -> None:
     """メイン処理"""
     # 出力ディレクトリ作成
     os.makedirs(OUTPUT_DIR, exist_ok=True)

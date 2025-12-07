@@ -4,6 +4,7 @@ PiCamera2を使用した写真撮影とGemini AIによる画像分析スクリ�
 音声ウェイクワード検出機能付き
 """
 
+from typing import Optional, List
 from picamera2 import Picamera2
 from datetime import datetime
 import time
@@ -50,7 +51,7 @@ VAD_MIN_DURATION = 0.5  # 最低録音時間（秒）
 VAD_CHUNK_SIZE = 4800  # 音声チャンクサイズ（サンプル数、約0.1秒分）
 
 
-def take_photo(filename=None):
+def take_photo(filename: Optional[str] = None) -> str:
     """カメラで写真を撮影する
     
     Args:
@@ -101,7 +102,7 @@ def take_photo(filename=None):
         raise RuntimeError(f"写真の撮影に失敗しました: {e}") from e
 
 
-def load_rag_prompt():
+def load_rag_prompt() -> str:
     """RAGプロンプトを読み込む
     
     Returns:
@@ -116,7 +117,7 @@ def load_rag_prompt():
     return ""
 
 
-def analyze_photo_with_gemini(image_path, prompt="この画像について詳しく説明してください。", use_rag=True):
+def analyze_photo_with_gemini(image_path: str, prompt: str = "この画像について詳しく説明してください。", use_rag: bool = True) -> str:
     """撮影した写真をGemini AIで分析する
     
     Args:
@@ -168,11 +169,14 @@ def analyze_photo_with_gemini(image_path, prompt="この画像について詳し
         raise RuntimeError(f"Gemini APIの呼び出しに失敗しました: {e}") from e
 
 
-def take_photo_and_analyze(prompt="この画像について詳しく説明してください。"):
+def take_photo_and_analyze(prompt: str = "この画像について詳しく説明してください。") -> tuple[str, str]:
     """写真を撮影してGemini AIで分析する
     
     Args:
         prompt: Geminiに送るプロンプト
+        
+    Returns:
+        tuple[str, str]: (写真のパス, 分析結果)
     """
     print("=" * 50)
     print("写真撮影とAI分析を開始します")
@@ -194,7 +198,7 @@ def take_photo_and_analyze(prompt="この画像について詳しく説明して
     return photo_path, result
 
 
-def record_voice_prompt(duration=RECORDING_DURATION, existing_stream=None, use_vad=True):
+def record_voice_prompt(duration: float = RECORDING_DURATION, existing_stream=None, use_vad: bool = True) -> Optional[str]:
     """音声でプロンプトを録音する（音声検出で自動停止）
     
     Args:
@@ -297,7 +301,7 @@ def record_voice_prompt(duration=RECORDING_DURATION, existing_stream=None, use_v
     return filename
 
 
-def speech_to_text_with_gemini(audio_path):
+def speech_to_text_with_gemini(audio_path: str) -> str:
     """音声ファイルをGeminiでテキストに変換する
     
     Args:
@@ -336,7 +340,7 @@ def speech_to_text_with_gemini(audio_path):
         raise RuntimeError(f"音声のテキスト変換に失敗しました: {e}") from e
 
 
-def take_photo_and_analyze_with_voice():
+def take_photo_and_analyze_with_voice() -> None:
     """ウェイクワードを待機し、音声プロンプトで写真を撮影・分析する"""
     import lwake.features as features
     
@@ -453,7 +457,7 @@ def take_photo_and_analyze_with_voice():
         import traceback
         traceback.print_exc()
 
-def take_multiple_photos(count=3, interval=2):
+def take_multiple_photos(count: int = 3, interval: float = 2) -> List[str]:
     """複数枚の写真を連続撮影する
     
     Args:
@@ -499,7 +503,7 @@ def take_multiple_photos(count=3, interval=2):
     
     return photo_paths
 
-def take_photo_with_metadata():
+def take_photo_with_metadata() -> str:
     """メタデータ付きで写真を撮影する
     
     Returns:
