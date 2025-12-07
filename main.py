@@ -14,13 +14,12 @@ from dotenv import load_dotenv
 from PIL import Image
 import soundfile as sf
 import warnings
-import os as _os
 import sounddevice as sd
 import librosa
 import numpy as np
 
 # ONNXRuntimeのGPU警告を抑制（ラズパイではGPUが利用できないため）
-_os.environ["ORT_DISABLE_ALL_PROVIDERS"] = "0"
+os.environ["ORT_DISABLE_ALL_PROVIDERS"] = "0"
 warnings.filterwarnings("ignore", category=UserWarning, module="onnxruntime")
 
 # USBマイクのネイティブサンプルレート（48000Hz）を使用
@@ -51,40 +50,47 @@ def take_photo(filename=None):
     
     Returns:
         str: 保存されたファイルのパス
+        
+    Raises:
+        RuntimeError: カメラの初期化または撮影に失敗した場合
     """
-    # 保存ディレクトリを作成
-    os.makedirs(PHOTO_DIR, exist_ok=True)
-    
-    # カメラの初期化
-    picam2 = Picamera2()
-    
-    # カメラ設定
-    camera_config = picam2.create_still_configuration()
-    picam2.configure(camera_config)
-    
-    # カメラの起動
-    picam2.start()
-    
-    # カメラのウォームアップ（推奨）
-    time.sleep(2)
-    
-    # ファイル名にタイムスタンプを使用
-    if filename is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"photo_{timestamp}.jpg"
-    
-    # フルパスを作成
-    filepath = os.path.join(PHOTO_DIR, filename)
-    
-    # 写真を撮影
-    picam2.capture_file(filepath)
-    print(f"写真を保存しました: {filepath}")
-    
-    # カメラの停止
-    picam2.stop()
-    picam2.close()
-    
-    return filepath
+    try:
+        # 保存ディレクトリを作成
+        os.makedirs(PHOTO_DIR, exist_ok=True)
+        
+        # カメラの初期化
+        picam2 = Picamera2()
+        
+        # カメラ設定
+        camera_config = picam2.create_still_configuration()
+        picam2.configure(camera_config)
+        
+        # カメラの起動
+        picam2.start()
+        
+        # カメラのウォームアップ（推奨）
+        time.sleep(2)
+        
+        # ファイル名にタイムスタンプを使用
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"photo_{timestamp}.jpg"
+        
+        # フルパスを作成
+        filepath = os.path.join(PHOTO_DIR, filename)
+        
+        # 写真を撮影
+        picam2.capture_file(filepath)
+        print(f"写真を保存しました: {filepath}")
+        
+        # カメラの停止
+        picam2.stop()
+        picam2.close()
+        
+        return filepath
+    except Exception as e:
+        print(f"エラー: 写真の撮影に失敗しました: {e}")
+        raise RuntimeError(f"写真の撮影に失敗しました: {e}") from e
 
 
 def load_rag_prompt():
@@ -112,34 +118,46 @@ def analyze_photo_with_gemini(image_path, prompt="この画像について詳し
     
     Returns:
         str: Geminiからの応答テキスト
+        
+    Raises:
+        FileNotFoundError: 画像ファイルが見つからない場合
+        RuntimeError: Gemini APIの呼び出しに失敗した場合
     """
-    # 画像を読み込む
-    image = Image.open(image_path)
+    # 画像ファイルの存在確認
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"画像ファイルが見つかりません: {image_path}")
     
-    # RAGプロンプトを読み込む
-    rag_prompt = ""
-    if use_rag:
-        rag_prompt = load_rag_prompt()
-    
-    # プロンプトを構築
-    if rag_prompt:
-        full_prompt = f"""{rag_prompt}
+    try:
+        # 画像を読み込む
+        image = Image.open(image_path)
+        
+        # RAGプロンプトを読み込む
+        rag_prompt = ""
+        if use_rag:
+            rag_prompt = load_rag_prompt()
+        
+        # プロンプトを構築
+        if rag_prompt:
+            full_prompt = f"""{rag_prompt}
 
 ---
 
 ユーザーの質問: {prompt}"""
-    else:
-        full_prompt = prompt
-    
-    # Geminiで分析
-    print(f"\nGemini AIで画像を分析中...")
-    print(f"プロンプト: {prompt}")
-    if rag_prompt:
-        print(f"（RAGコンテキスト: {len(rag_prompt)}文字）")
-    
-    response = model.generate_content([full_prompt, image])
-    
-    return response.text
+        else:
+            full_prompt = prompt
+        
+        # Geminiで分析
+        print(f"\nGemini AIで画像を分析中...")
+        print(f"プロンプト: {prompt}")
+        if rag_prompt:
+            print(f"（RAGコンテキスト: {len(rag_prompt)}文字）")
+        
+        response = model.generate_content([full_prompt, image])
+        
+        return response.text
+    except Exception as e:
+        print(f"エラー: Gemini APIの呼び出しに失敗しました: {e}")
+        raise RuntimeError(f"Gemini APIの呼び出しに失敗しました: {e}") from e
 
 
 def take_photo_and_analyze(prompt="この画像について詳しく説明してください。"):
@@ -282,23 +300,35 @@ def speech_to_text_with_gemini(audio_path):
     
     Returns:
         str: 変換されたテキスト
+        
+    Raises:
+        FileNotFoundError: 音声ファイルが見つからない場合
+        RuntimeError: Gemini APIの呼び出しに失敗した場合
     """
-    print("音声をテキストに変換中...")
+    # 音声ファイルの存在確認
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(f"音声ファイルが見つかりません: {audio_path}")
     
-    # Gemini APIで音声を処理
-    audio_file = genai.upload_file(path=audio_path)
-    response = model.generate_content([
-        "この音声を正確に文字起こししてください。テキストのみを返してください。",
-        audio_file
-    ])
-    
-    text = response.text.strip()
-    print(f"認識されたテキスト: {text}")
-    
-    # アップロードしたファイルを削除
-    audio_file.delete()
-    
-    return text
+    try:
+        print("音声をテキストに変換中...")
+        
+        # Gemini APIで音声を処理
+        audio_file = genai.upload_file(path=audio_path)
+        response = model.generate_content([
+            "この音声を正確に文字起こししてください。テキストのみを返してください。",
+            audio_file
+        ])
+        
+        text = response.text.strip()
+        print(f"認識されたテキスト: {text}")
+        
+        # アップロードしたファイルを削除
+        audio_file.delete()
+        
+        return text
+    except Exception as e:
+        print(f"エラー: 音声のテキスト変換に失敗しました: {e}")
+        raise RuntimeError(f"音声のテキスト変換に失敗しました: {e}") from e
 
 
 def take_photo_and_analyze_with_voice():
@@ -430,6 +460,9 @@ def take_multiple_photos(count=3, interval=2):
     Returns:
         list: 保存されたファイルのパスのリスト
     """
+    # 保存ディレクトリを作成
+    os.makedirs(PHOTO_DIR, exist_ok=True)
+    
     photo_paths = []
     picam2 = Picamera2()
     camera_config = picam2.create_still_configuration()
@@ -441,9 +474,10 @@ def take_multiple_photos(count=3, interval=2):
     for i in range(count):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"photo_{timestamp}_{i+1}.jpg"
-        picam2.capture_file(filename)
-        photo_paths.append(filename)
-        print(f"写真 {i+1}/{count} を保存しました: {filename}")
+        filepath = os.path.join(PHOTO_DIR, filename)
+        picam2.capture_file(filepath)
+        photo_paths.append(filepath)
+        print(f"写真 {i+1}/{count} を保存しました: {filepath}")
         
         if i < count - 1:
             time.sleep(interval)
@@ -454,7 +488,14 @@ def take_multiple_photos(count=3, interval=2):
     return photo_paths
 
 def take_photo_with_metadata():
-    """メタデータ付きで写真を撮影する"""
+    """メタデータ付きで写真を撮影する
+    
+    Returns:
+        str: 保存されたファイルのパス
+    """
+    # 保存ディレクトリを作成
+    os.makedirs(PHOTO_DIR, exist_ok=True)
+    
     picam2 = Picamera2()
     
     # より詳細な設定
@@ -470,7 +511,20 @@ def take_photo_with_metadata():
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"photo_{timestamp}.jpg"
+    filepath = os.path.join(PHOTO_DIR, filename)
     
+    # メタデータを取得して写真を撮影
+    metadata = picam2.capture_metadata()
+    picam2.capture_file(filepath)
+    
+    print(f"写真を保存しました: {filepath}")
+    print(f"メタデータ: {metadata}")
+    
+    # カメラの停止
+    picam2.stop()
+    picam2.close()
+    
+    return filepath
 
 if __name__ == "__main__":
     # デフォルトで音声認識モード
