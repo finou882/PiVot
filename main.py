@@ -4,7 +4,7 @@ PiCamera2を使用した写真撮影とGemini AIによる画像分析スクリ�
 音声ウェイクワード検出機能付き
 """
 
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Any
 from picamera2 import Picamera2
 from datetime import datetime
 import time
@@ -200,7 +200,7 @@ def take_photo_and_analyze(prompt: str = "この画像について詳しく説�
     return photo_path, result
 
 
-def record_voice_prompt(duration: float = RECORDING_DURATION, existing_stream=None, use_vad: bool = True) -> Optional[str]:
+def record_voice_prompt(duration: float = RECORDING_DURATION, existing_stream: Optional[Any] = None, use_vad: bool = True) -> Optional[str]:
     """音声でプロンプトを録音する（音声検出で自動停止）
     
     Args:
@@ -510,39 +510,46 @@ def take_photo_with_metadata() -> str:
     
     Returns:
         str: 保存されたファイルのパス
+        
+    Raises:
+        RuntimeError: カメラの初期化または撮影に失敗した場合
     """
-    # 保存ディレクトリを作成
-    os.makedirs(PHOTO_DIR, exist_ok=True)
-    
-    picam2 = Picamera2()
-    
-    # より詳細な設定
-    config = picam2.create_still_configuration(
-        main={"size": (1920, 1080)},  # 解像度の指定
-        lores={"size": (640, 480)},    # 低解像度プレビュー
-        display="lores"
-    )
-    picam2.configure(config)
-    picam2.start()
-    
-    time.sleep(2)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"photo_{timestamp}.jpg"
-    filepath = os.path.join(PHOTO_DIR, filename)
-    
-    # メタデータを取得して写真を撮影
-    metadata = picam2.capture_metadata()
-    picam2.capture_file(filepath)
-    
-    print(f"写真を保存しました: {filepath}")
-    print(f"メタデータ: {metadata}")
-    
-    # カメラの停止
-    picam2.stop()
-    picam2.close()
-    
-    return filepath
+    try:
+        # 保存ディレクトリを作成
+        os.makedirs(PHOTO_DIR, exist_ok=True)
+        
+        picam2 = Picamera2()
+        
+        # より詳細な設定
+        config = picam2.create_still_configuration(
+            main={"size": (1920, 1080)},  # 解像度の指定
+            lores={"size": (640, 480)},    # 低解像度プレビュー
+            display="lores"
+        )
+        picam2.configure(config)
+        picam2.start()
+        
+        time.sleep(2)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"photo_{timestamp}.jpg"
+        filepath = os.path.join(PHOTO_DIR, filename)
+        
+        # メタデータを取得して写真を撮影
+        metadata = picam2.capture_metadata()
+        picam2.capture_file(filepath)
+        
+        print(f"写真を保存しました: {filepath}")
+        print(f"メタデータ: {metadata}")
+        
+        # カメラの停止
+        picam2.stop()
+        picam2.close()
+        
+        return filepath
+    except Exception as e:
+        print(f"エラー: 写真の撮影に失敗しました: {e}")
+        raise RuntimeError(f"写真の撮影に失敗しました: {e}") from e
 
 if __name__ == "__main__":
     # デフォルトで音声認識モード

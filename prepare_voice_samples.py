@@ -5,7 +5,6 @@
 - 指定の長さに統一（末尾に無音をパディング）
 """
 
-from typing import Optional
 import soundfile as sf
 import librosa
 import numpy as np
@@ -61,7 +60,6 @@ def prepare_sample(input_file: str, output_file: str, target_sr: int = 16000, ta
         info = sf.info(output_file)
         print(f"  → {info.duration:.3f}秒, {info.samplerate}Hz")
     except Exception as e:
-        print(f"エラー: 音声サンプルの処理に失敗しました: {e}")
         raise RuntimeError(f"音声サンプルの処理に失敗しました: {e}") from e
 
 def main() -> None:
