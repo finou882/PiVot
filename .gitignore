@@ -21,3 +21,6 @@ Past_Photo/
 # Model directories
 gemma-3-4b-it-qat-q4_0-gguf/
 gemma-3-1b-it-qat-q4_0-gguf/
+
+# Lib of Audio
+aquestalkpi/
