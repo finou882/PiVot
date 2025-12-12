@@ -16,6 +16,10 @@ import warnings
 import sounddevice as sd
 import librosa
 import numpy as np
+import re
+from urllib.parse import urlencode
+from urllib.request import urlopen
+from urllib.error import URLError
 
 RECORDING_SAMPLE_RATE = 48000
 TARGET_SAMPLE_RATE = 16000
@@ -45,6 +49,13 @@ PHOTO_DIR = "./Past_Photo"  # 写真保存ディレクトリ
 PROMPT_DIR = "./Past_Prompt"  # 音声プロンプト保存ディレクトリ
 AQUESTALK_PATH = "./aquestalkpi/AquesTalkPi"
 AQUESTALK_DEVICE = "plughw:1,0"
+SERVO_API_BASE_URL = "http://172.20.10.3"
+SERVO_AXIS_CHANNEL_MAP = {"x": 0, "y": 1}
+SERVO_MIN_ANGLE = 0
+SERVO_MAX_ANGLE = 180
+SERVO_COMMAND_PATTERN = re.compile(r'req\.servo\s*\(([^)]*)\)', re.IGNORECASE)
+SERVO_AXIS_PATTERN = re.compile(r'axis\s*=\s*[\'"]?\s*([xy])', re.IGNORECASE)
+SERVO_ANGLE_PATTERN = re.compile(r'angle\s*(?:=|:)\s*([-+]?\s*\d+)', re.IGNORECASE)
 
 # 音声検出パラメータ
 VAD_SILENCE_THRESHOLD = 0.01  # 無音判定の閾値（RMS）
@@ -173,6 +184,58 @@ def synthesize_speech(text: str) -> None:
         print(f"エラー: 音声合成に失敗しました: {e}")
 
 
+def send_servo_command(axis: str, angle: int) -> None:
+    channel = SERVO_AXIS_CHANNEL_MAP.get(axis)
+    if channel is None:
+        print(f"警告: 未対応の軸 {axis} を受信しました")
+        return
+
+    clamped_angle = max(SERVO_MIN_ANGLE, min(SERVO_MAX_ANGLE, angle))
+    if clamped_angle != angle:
+        print(f"角度{angle}を{clamped_angle}に補正しました")
+
+    query = urlencode({"ch": channel, "angle": clamped_angle})
+    url = f"{SERVO_API_BASE_URL}/servo?{query}"
+
+    try:
+        with urlopen(url, timeout=3) as response:
+            response.read()
+        print(f"サーボ送信成功: axis={axis}, ch={channel}, angle={clamped_angle}")
+    except URLError as exc:
+        print(f"エラー: サーボ送信に失敗しました ({url}): {exc}")
+
+
+def handle_servo_commands(response_text: str) -> str:
+    cleaned_lines: List[str] = []
+
+    for raw_line in response_text.splitlines():
+        for match in SERVO_COMMAND_PATTERN.finditer(raw_line):
+            args = match.group(1)
+            axis_match = SERVO_AXIS_PATTERN.search(args)
+            angle_match = SERVO_ANGLE_PATTERN.search(args)
+
+            if not axis_match or not angle_match:
+                print(f"警告: サーボコマンドを解析できませんでした: {match.group(0)}")
+                continue
+
+            axis = axis_match.group(1).lower()
+
+            try:
+                angle_str = angle_match.group(1).replace(' ', '')
+                angle = int(angle_str)
+            except ValueError:
+                print(f"警告: 角度の解析に失敗しました: {match.group(0)}")
+                continue
+
+            send_servo_command(axis, angle)
+
+        cleaned_line = SERVO_COMMAND_PATTERN.sub('', raw_line).strip()
+        if cleaned_line:
+            cleaned_lines.append(cleaned_line)
+
+    return "\n".join(cleaned_lines)
+
+
 def take_photo_and_analyze(prompt: str = "") -> Tuple[str, str]:
     print("=" * 50)
     print("写真撮影とAI分析を開始します")
@@ -186,7 +249,8 @@ def take_photo_and_analyze(prompt: str = "") -> Tuple[str, str]:
     print("=" * 50)
     print(result)
     print("=" * 50)
-    synthesize_speech(result)
+    speech_text = handle_servo_commands(result)
+    synthesize_speech(speech_text)
     
     return photo_path, result
 
@@ -383,7 +447,8 @@ def take_photo_and_analyze_with_voice() -> None:
                     print("=" * 50)
                     print(result)
                     print("=" * 50)
-                    synthesize_speech(result)
+                    speech_text = handle_servo_commands(result)
+                    synthesize_speech(speech_text)
                     
                     print(f"音声プロンプトを保存しました: {prompt_audio}")
                     
