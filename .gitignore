@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment variables
+.env
+
+# Temporary audio files
+prompt_*.wav
+
+# Photo directory
+Past_Photo/
+
+# Model directories
+gemma-3-4b-it-qat-q4_0-gguf/
+gemma-3-1b-it-qat-q4_0-gguf/
