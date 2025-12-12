@@ -11,4 +11,5 @@ dependencies = [
     "picamera2>=0.3.31",
     "python-dotenv>=1.2.1",
     "soundfile>=0.13.1",
+    "pyserial>=3.5",
 ]

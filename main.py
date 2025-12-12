@@ -2,7 +2,7 @@
 
 from typing import Optional, List, Tuple, Any
 from picamera2 import Picamera2
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 import os
 from pathlib import Path
@@ -17,6 +17,7 @@ import sounddevice as sd
 import librosa
 import numpy as np
 import re
+import httpx
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from urllib.error import URLError
@@ -56,6 +57,37 @@ SERVO_MAX_ANGLE = 180
 SERVO_COMMAND_PATTERN = re.compile(r'req\.servo\s*\(([^)]*)\)', re.IGNORECASE)
 SERVO_AXIS_PATTERN = re.compile(r'axis\s*=\s*[\'"]?\s*([xy])', re.IGNORECASE)
 SERVO_ANGLE_PATTERN = re.compile(r'angle\s*(?:=|:)\s*([-+]?\s*\d+)', re.IGNORECASE)
+DEFAULT_USER_PROMPT = "この視界について説明してください。"
+
+
+def _get_int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        print(f"警告: {name} の値 {value} を整数に変換できませんでした。既定値 {default} を使用します")
+        return default
+
+
+def _get_float_env(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        print(f"警告: {name} の値 {value} を浮動小数点に変換できませんでした。既定値 {default} を使用します")
+        return default
+
+
+MODEM_PORT = os.getenv("QUECTEL_MODEM_PORT", "/dev/ttyUSB2")
+MODEM_BAUDRATE = _get_int_env("QUECTEL_MODEM_BAUDRATE", 115200)
+MODEM_LINE_TIMEOUT = _get_float_env("QUECTEL_MODEM_TIMEOUT", 1.0)
+MODEM_QUERY_TIMEOUT = _get_float_env("QUECTEL_MODEM_QUERY_TIMEOUT", 5.0)
+GPS_REVERSE_GEOCODE_URL = os.getenv("GPS_REVERSE_GEOCODE_URL", "https://nominatim.openstreetmap.org/reverse")
+GPS_USER_AGENT = os.getenv("GPS_REVERSE_GEOCODE_USER_AGENT", "PiVot/0.1 (+https://github.com/finou/PiVot)")
 
 # 音声検出パラメータ
 VAD_SILENCE_THRESHOLD = 0.01  # 無音判定の閾値（RMS）
@@ -100,6 +132,167 @@ def load_rag_prompt() -> str:
     return ""
 
 
+def query_gpgga_sentence() -> Optional[str]:
+    try:
+        import serial  # type: ignore
+    except ImportError:
+        print("警告: pyserialがインストールされていないためGPSを利用できません")
+        return None
+
+    try:
+        with serial.Serial(MODEM_PORT, MODEM_BAUDRATE, timeout=MODEM_LINE_TIMEOUT) as ser:
+            ser.write(b"AT+QGPS=1\r")
+            time.sleep(0.5)
+            ser.reset_input_buffer()
+            ser.write(b'AT+QGPSGNMEA="GGA"\r')
+
+            deadline = time.time() + MODEM_QUERY_TIMEOUT
+            while time.time() < deadline:
+                line = ser.readline().decode(errors="ignore").strip()
+                if not line:
+                    continue
+                if line.startswith("$GPGGA"):
+                    return line
+    except Exception as exc:
+        print(f"警告: GPGGA取得に失敗しました: {exc}")
+    return None
+
+
+def nmea_to_decimal(coord: str, direction: str) -> Optional[float]:
+    if not coord or not direction:
+        return None
+
+    try:
+        coord = coord.strip()
+        direction = direction.strip().upper()
+        degrees_len = 2 if direction in {"N", "S"} else 3
+        degrees = int(coord[:degrees_len])
+        minutes = float(coord[degrees_len:])
+        value = degrees + minutes / 60.0
+        if direction in {"S", "W"}:
+            value *= -1
+        return value
+    except (ValueError, IndexError):
+        return None
+
+
+def parse_gpgga_sentence(sentence: str) -> Optional[dict]:
+    fields = sentence.split(',')
+    if len(fields) < 10:
+        print("警告: GPGGA文のフィールド数が不足しています")
+        return None
+
+    fix_quality = fields[6]
+    if not fix_quality or fix_quality == '0':
+        print("警告: GPSがFIXしていません")
+        return None
+
+    latitude = nmea_to_decimal(fields[2], fields[3])
+    longitude = nmea_to_decimal(fields[4], fields[5])
+
+    if latitude is None or longitude is None:
+        print("警告: 緯度経度の解析に失敗しました")
+        return None
+
+    timestamp_utc = None
+    time_field = fields[1]
+    if time_field:
+        try:
+            hour = int(time_field[0:2])
+            minute = int(time_field[2:4])
+            seconds_float = float(time_field[4:])
+            second = int(seconds_float)
+            micro = int(round((seconds_float - second) * 1_000_000))
+            today = datetime.utcnow().date()
+            timestamp_utc = datetime(today.year, today.month, today.day, hour, minute, second, micro, tzinfo=timezone.utc)
+        except (ValueError, IndexError):
+            print("警告: 時刻フィールドの解析に失敗しました")
+
+    return {
+        "latitude": latitude,
+        "longitude": longitude,
+        "timestamp": timestamp_utc,
+        "raw": sentence,
+    }
+
+
+def reverse_geocode(latitude: float, longitude: float) -> Optional[str]:
+    try:
+        response = httpx.get(
+            GPS_REVERSE_GEOCODE_URL,
+            params={"lat": latitude, "lon": longitude, "format": "jsonv2"},
+            headers={"User-Agent": GPS_USER_AGENT},
+            timeout=5.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("display_name")
+    except Exception as exc:
+        print(f"警告: 逆ジオコーディングに失敗しました: {exc}")
+    return None
+
+
+def get_location_context() -> Optional[str]:
+    sentence = query_gpgga_sentence()
+    if not sentence:
+        return None
+
+    parsed = parse_gpgga_sentence(sentence)
+    if not parsed:
+        return None
+
+    latitude = parsed["latitude"]
+    longitude = parsed["longitude"]
+    timestamp_utc = parsed["timestamp"]
+
+    address = reverse_geocode(latitude, longitude)
+
+    lines = []
+    if address:
+        lines.append(f"現在地: {address}")
+    else:
+        lines.append(f"現在地: 緯度{latitude:.6f}, 経度{longitude:.6f}")
+
+    if timestamp_utc:
+        local_timestamp = timestamp_utc.astimezone()
+        lines.append(f"取得時刻: {local_timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+
+    context = "\n".join(lines)
+    print(f"GPSコンテキストを取得しました: {context}")
+    return context
+
+
+def inject_location_context(rag_prompt: str, location_context: Optional[str]) -> str:
+    if not rag_prompt or not location_context:
+        return rag_prompt
+
+    delimiter = "/////"
+    if delimiter not in rag_prompt:
+        return f"{rag_prompt}\n{location_context}".strip()
+
+    head, tail = rag_prompt.split(delimiter, 1)
+    tail = tail.lstrip("\n")
+    return f"{head}{delimiter}\n{location_context}\n{tail}".strip()
+
+
+def build_full_prompt(rag_prompt: str, user_prompt: str) -> str:
+    sanitized_rag = rag_prompt.strip()
+    sanitized_user = user_prompt.strip()
+
+    if not sanitized_rag:
+        return sanitized_user or DEFAULT_USER_PROMPT
+
+    if "/////" in sanitized_rag:
+        if sanitized_user:
+            return f"{sanitized_rag}\n{sanitized_user}"
+        return sanitized_rag
+
+    if sanitized_user:
+        return f"{sanitized_rag}\n\n{sanitized_user}"
+
+    return sanitized_rag
+
+
 def analyze_photo_with_gemini(image_path: str, prompt: str = "", use_rag: bool = True) -> str:
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"画像ファイルが見つかりません: {image_path}")
@@ -110,25 +303,20 @@ def analyze_photo_with_gemini(image_path: str, prompt: str = "", use_rag: bool =
         rag_prompt = ""
         if use_rag:
             rag_prompt = load_rag_prompt()
-        
+
+        location_context = get_location_context() if use_rag else None
         if rag_prompt:
-            if rag_prompt.strip().endswith("/////"):
-                full_prompt = f"""{rag_prompt}
-{prompt}""" if prompt else rag_prompt
-            else:
-                full_prompt = f"""{rag_prompt}
-
-/////
-{prompt}""" if prompt else f"""{rag_prompt}
-
-/////"""
-        else:
-            full_prompt = prompt if prompt else "この画像について教えてください。"
+            rag_prompt = inject_location_context(rag_prompt, location_context)
+        elif location_context:
+            rag_prompt = location_context
+        
+        user_prompt = prompt.strip() if prompt else DEFAULT_USER_PROMPT
+        full_prompt = build_full_prompt(rag_prompt, user_prompt)
         
         print(f"\nGemini AIで画像を分析中...")
         print(f"プロンプト: {prompt}")
         if rag_prompt:
-            print(f"（RAGコンテキスト: {len(rag_prompt)}文字）")
+            print(f"(RAGコンテキスト: {len(rag_prompt)}文字)")
         
         response = model.generate_content([full_prompt, image])
         
