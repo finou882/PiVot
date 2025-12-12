@@ -6,6 +6,8 @@ from datetime import datetime
 import time
 import os
 from pathlib import Path
+import subprocess
+import shutil
 import google.generativeai as genai
 from dotenv import load_dotenv
 from PIL import Image
@@ -41,6 +43,8 @@ REFERENCE_AUDIO_LENGTH = 2.5  # リファレンス音声の統一長（秒）
 RAG_PROMPT_FILE = "./rag_prompt.txt"  # RAGプロンプトファイル
 PHOTO_DIR = "./Past_Photo"  # 写真保存ディレクトリ
 PROMPT_DIR = "./Past_Prompt"  # 音声プロンプト保存ディレクトリ
+AQUESTALK_PATH = "./aquestalkpi/AquesTalkPi"
+AQUESTALK_DEVICE = "plughw:1,0"
 
 # 音声検出パラメータ
 VAD_SILENCE_THRESHOLD = 0.01  # 無音判定の閾値（RMS）
@@ -123,6 +127,52 @@ def analyze_photo_with_gemini(image_path: str, prompt: str = "", use_rag: bool =
         raise RuntimeError(f"Gemini APIの呼び出しに失敗しました: {e}") from e
 
 
+def synthesize_speech(text: str) -> None:
+    if not text:
+        return
+
+    try:
+        clean_text = text.replace("\n", " ").strip()
+        if not clean_text:
+            return
+
+        if not os.path.exists(AQUESTALK_PATH):
+            print(f"エラー: 音声合成バイナリが見つかりません: {AQUESTALK_PATH}")
+            return
+
+        if shutil.which("aplay") is None:
+            print("エラー: aplay コマンドが見つかりません")
+            return
+
+        tts_result = subprocess.run(
+            [AQUESTALK_PATH, clean_text],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        if tts_result.returncode != 0:
+            error_msg = tts_result.stderr.decode(errors="ignore") if tts_result.stderr else "Unknown error"
+            print(f"エラー: AquesTalkPi の実行に失敗しました: {error_msg.strip()}")
+            return
+
+        if not tts_result.stdout:
+            print("エラー: AquesTalkPi から音声データが生成されませんでした")
+            return
+
+        aplay_result = subprocess.run(
+            ["aplay", "-D", AQUESTALK_DEVICE],
+            input=tts_result.stdout,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+
+        if aplay_result.returncode != 0:
+            error_msg = aplay_result.stderr.decode(errors="ignore") if aplay_result.stderr else "Unknown error"
+            print(f"エラー: aplay の再生に失敗しました: {error_msg.strip()}")
+    except Exception as e:
+        print(f"エラー: 音声合成に失敗しました: {e}")
+
+
 def take_photo_and_analyze(prompt: str = "") -> Tuple[str, str]:
     print("=" * 50)
     print("写真撮影とAI分析を開始します")
@@ -136,6 +186,7 @@ def take_photo_and_analyze(prompt: str = "") -> Tuple[str, str]:
     print("=" * 50)
     print(result)
     print("=" * 50)
+    synthesize_speech(result)
     
     return photo_path, result
 
@@ -332,6 +383,7 @@ def take_photo_and_analyze_with_voice() -> None:
                     print("=" * 50)
                     print(result)
                     print("=" * 50)
+                    synthesize_speech(result)
                     
                     print(f"音声プロンプトを保存しました: {prompt_audio}")
                     
