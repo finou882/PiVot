@@ -9,6 +9,7 @@ dependencies = [
     "httpx>=0.28.1",
     "local-wake>=0.1.0",
     "picamera2>=0.3.31",
+    "pyserial>=3.5",
     "python-dotenv>=1.2.1",
     "soundfile>=0.13.1",
     "pyserial>=3.5",

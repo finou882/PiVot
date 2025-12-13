@@ -99,6 +99,9 @@ VAD_CHUNK_SIZE = 4800  # 音声チャンクサイズ（サンプル数、約0.1�
 def take_photo(filename: Optional[str] = None) -> str:
     try:
         os.makedirs(PHOTO_DIR, exist_ok=True)
+        camera_info = Picamera2.global_camera_info()
+        if not camera_info:
+            raise RuntimeError("利用可能なカメラが検出されませんでした")
         picam2 = Picamera2()
         camera_config = picam2.create_still_configuration()
         picam2.configure(camera_config)
@@ -626,7 +629,13 @@ def take_photo_and_analyze_with_voice() -> None:
                     prompt_text = speech_to_text_with_gemini(prompt_audio)
                     
                     print("\n写真を撮影します...")
-                    photo_path = take_photo()
+                    try:
+                        photo_path = take_photo()
+                    except RuntimeError as camera_error:
+                        print(f"エラー: {camera_error}")
+                        audio_buffer = np.zeros(buffer_samples, dtype=np.float32)
+                        print(f"\n再度ウェイクワードを言ってください...")
+                        continue
                     
                     result = analyze_photo_with_gemini(photo_path, prompt_text)
                     
