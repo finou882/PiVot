@@ -12,7 +12,7 @@ import subprocess
 import shutil
 import google.generativeai as genai
 from dotenv import load_dotenv
-from PIL import Image
+from PIL import Image, ImageDraw
 import soundfile as sf
 import warnings
 import sounddevice as sd
@@ -106,32 +106,47 @@ VAD_CHUNK_SIZE = 4800  # 音声チャンクサイズ（サンプル数、約0.1�
 
 
 def take_photo(filename: Optional[str] = None) -> str:
+    os.makedirs(PHOTO_DIR, exist_ok=True)
+
+    def create_placeholder_image(path: str) -> str:
+        placeholder = Image.new("RGB", (640, 480), (64, 64, 64))
+        draw = ImageDraw.Draw(placeholder)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        draw.text((20, 20), "NO CAMERA", fill=(255, 255, 255))
+        draw.text((20, 60), timestamp, fill=(200, 200, 200))
+        placeholder.save(path)
+        print(f"カメラ未検出のためダミー画像を保存しました: {path}")
+        return path
+
+    if filename is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"photo_{timestamp}.jpg"
+
+    filepath = os.path.join(PHOTO_DIR, filename)
+
+    camera_info = None
     try:
-        os.makedirs(PHOTO_DIR, exist_ok=True)
         camera_info = Picamera2.global_camera_info()
-        if not camera_info:
-            raise RuntimeError("利用可能なカメラが検出されませんでした")
+    except Exception as exc:
+        print(f"警告: カメラ情報の取得に失敗しました: {exc}")
+
+    if not camera_info:
+        return create_placeholder_image(filepath)
+
+    try:
         picam2 = Picamera2()
         camera_config = picam2.create_still_configuration()
         picam2.configure(camera_config)
         picam2.start()
         time.sleep(2)
-        
-        if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"photo_{timestamp}.jpg"
-        
-        filepath = os.path.join(PHOTO_DIR, filename)
         picam2.capture_file(filepath)
         print(f"写真を保存しました: {filepath}")
-        
         picam2.stop()
         picam2.close()
-        
         return filepath
-    except Exception as e:
-        print(f"エラー: 写真の撮影に失敗しました: {e}")
-        raise RuntimeError(f"写真の撮影に失敗しました: {e}") from e
+    except Exception as exc:
+        print(f"警告: 写真の撮影に失敗しました（ダミーを使用）: {exc}")
+        return create_placeholder_image(filepath)
 
 
 def load_rag_prompt() -> str:
