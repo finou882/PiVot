@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 import time
 import os
 from pathlib import Path
+import io
+import tempfile
 import subprocess
 import shutil
 import google.generativeai as genai
@@ -18,6 +20,7 @@ import librosa
 import numpy as np
 import re
 import httpx
+import random
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from urllib.error import URLError
@@ -49,7 +52,12 @@ RAG_PROMPT_FILE = "./rag_prompt.txt"  # RAGプロンプトファイル
 PHOTO_DIR = "./Past_Photo"  # 写真保存ディレクトリ
 PROMPT_DIR = "./Past_Prompt"  # 音声プロンプト保存ディレクトリ
 AQUESTALK_PATH = "./aquestalkpi/AquesTalkPi"
-AQUESTALK_DEVICE = "plughw:1,0"
+AQUESTALK_DEVICE = os.getenv("AQUESTALK_DEVICE", "plughw:3,0")
+ENABLE_GPS = False  # GPS機能を使用する場合はTrue
+SPEECH_LEADING_SILENCE_SEC = 0.5
+GEMINI_MAX_RETRIES = 5
+GEMINI_BACKOFF_INITIAL_SEC = 1.0
+GEMINI_BACKOFF_MAX_SEC = 10.0
 SERVO_API_BASE_URL = "http://172.20.10.3"
 SERVO_AXIS_CHANNEL_MAP = {"x": 0, "y": 1}
 SERVO_MIN_ANGLE = 0
@@ -58,6 +66,7 @@ SERVO_COMMAND_PATTERN = re.compile(r'req\.servo\s*\(([^)]*)\)', re.IGNORECASE)
 SERVO_AXIS_PATTERN = re.compile(r'axis\s*=\s*[\'"]?\s*([xy])', re.IGNORECASE)
 SERVO_ANGLE_PATTERN = re.compile(r'angle\s*(?:=|:)\s*([-+]?\s*\d+)', re.IGNORECASE)
 DEFAULT_USER_PROMPT = "この視界について説明してください。"
+SERVO_COMMAND_DELAY_SEC = 1.5
 
 
 def _get_int_env(name: str, default: int) -> int:
@@ -236,6 +245,9 @@ def reverse_geocode(latitude: float, longitude: float) -> Optional[str]:
 
 
 def get_location_context() -> Optional[str]:
+    if not ENABLE_GPS:
+        return None
+
     sentence = query_gpgga_sentence()
     if not sentence:
         return None
@@ -296,6 +308,23 @@ def build_full_prompt(rag_prompt: str, user_prompt: str) -> str:
     return sanitized_rag
 
 
+def generate_content_with_retry(request_content: List[Any]) -> Any:
+    delay = GEMINI_BACKOFF_INITIAL_SEC
+
+    for attempt in range(1, GEMINI_MAX_RETRIES + 1):
+        try:
+            return model.generate_content(request_content)
+        except Exception as exc:
+            if attempt == GEMINI_MAX_RETRIES:
+                raise
+
+            capped_delay = min(delay, GEMINI_BACKOFF_MAX_SEC)
+            sleep_for = random.uniform(0, capped_delay)
+            print(f"Gemini API再試行 {attempt}/{GEMINI_MAX_RETRIES} 待機{sleep_for:.1f}秒: {exc}")
+            time.sleep(sleep_for)
+            delay = min(delay * 2, GEMINI_BACKOFF_MAX_SEC)
+
+
 def analyze_photo_with_gemini(image_path: str, prompt: str = "", use_rag: bool = True) -> str:
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"画像ファイルが見つかりません: {image_path}")
@@ -307,7 +336,7 @@ def analyze_photo_with_gemini(image_path: str, prompt: str = "", use_rag: bool =
         if use_rag:
             rag_prompt = load_rag_prompt()
 
-        location_context = get_location_context() if use_rag else None
+        location_context = get_location_context() if (use_rag and ENABLE_GPS) else None
         if rag_prompt:
             rag_prompt = inject_location_context(rag_prompt, location_context)
         elif location_context:
@@ -321,7 +350,7 @@ def analyze_photo_with_gemini(image_path: str, prompt: str = "", use_rag: bool =
         if rag_prompt:
             print(f"(RAGコンテキスト: {len(rag_prompt)}文字)")
         
-        response = model.generate_content([full_prompt, image])
+        response = generate_content_with_retry([full_prompt, image])
         
         return response.text
     except Exception as e:
@@ -342,9 +371,28 @@ def synthesize_speech(text: str) -> None:
             print(f"エラー: 音声合成バイナリが見つかりません: {AQUESTALK_PATH}")
             return
 
-        if shutil.which("aplay") is None:
+        aplay_path = shutil.which("aplay")
+        if aplay_path is None:
             print("エラー: aplay コマンドが見つかりません")
             return
+
+        device = AQUESTALK_DEVICE
+        if not device:
+            print("エラー: AQUESTALK_DEVICE が設定されていません")
+            return
+
+        if device.startswith("plughw:"):
+            parts = device.split(":", 1)[1].split(",")
+            if len(parts) == 2:
+                card, sub = parts
+                card_path = Path(f"/dev/snd/pcmC{card}D{sub}p")
+                if not card_path.exists():
+                    print(f"エラー: 出力デバイスが見つかりません: {card_path}")
+                    return
+        elif device.startswith("default"):
+            pass
+        else:
+            print(f"警告: 未対応のデバイス指定です（{device}）。aplayが失敗する可能性があります")
 
         tts_result = subprocess.run(
             [AQUESTALK_PATH, clean_text],
@@ -361,12 +409,46 @@ def synthesize_speech(text: str) -> None:
             print("エラー: AquesTalkPi から音声データが生成されませんでした")
             return
 
-        aplay_result = subprocess.run(
-            ["aplay", "-D", AQUESTALK_DEVICE],
-            input=tts_result.stdout,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
+        try:
+            audio_buffer = io.BytesIO(tts_result.stdout)
+            audio_data, sample_rate = sf.read(audio_buffer, dtype="float32")
+        except Exception as decode_error:
+            print(f"エラー: 合成音声の読み込みに失敗しました: {decode_error}")
+            return
+
+        if sample_rate <= 0:
+            print("エラー: 合成音声のサンプルレートが不正です")
+            return
+
+        leading_samples = int(sample_rate * SPEECH_LEADING_SILENCE_SEC)
+        if leading_samples > 0:
+            if audio_data.ndim == 1:
+                silence = np.zeros(leading_samples, dtype=np.float32)
+            else:
+                silence = np.zeros((leading_samples, audio_data.shape[1]), dtype=np.float32)
+            padded_audio = np.concatenate((silence, audio_data), axis=0)
+        else:
+            padded_audio = audio_data
+
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                sf.write(tmp_file.name, padded_audio, sample_rate)
+                temp_path = tmp_file.name
+        except Exception as write_error:
+            print(f"エラー: 合成音声の保存に失敗しました: {write_error}")
+            return
+
+        try:
+            aplay_result = subprocess.run(
+                [aplay_path, "-D", device, temp_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+        finally:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
         if aplay_result.returncode != 0:
             error_msg = aplay_result.stderr.decode(errors="ignore") if aplay_result.stderr else "Unknown error"
@@ -398,9 +480,12 @@ def send_servo_command(axis: str, angle: int) -> None:
 
 def handle_servo_commands(response_text: str) -> str:
     cleaned_lines: List[str] = []
+    pending_commands: List[Tuple[str, int]] = []
 
     for raw_line in response_text.splitlines():
-        for match in SERVO_COMMAND_PATTERN.finditer(raw_line):
+        expanded_line = raw_line.replace(',', '\n')
+        matches = list(SERVO_COMMAND_PATTERN.finditer(expanded_line))
+        for match in matches:
             args = match.group(1)
             axis_match = SERVO_AXIS_PATTERN.search(args)
             angle_match = SERVO_ANGLE_PATTERN.search(args)
@@ -418,11 +503,16 @@ def handle_servo_commands(response_text: str) -> str:
                 print(f"警告: 角度の解析に失敗しました: {match.group(0)}")
                 continue
 
-            send_servo_command(axis, angle)
+            pending_commands.append((axis, angle))
 
-        cleaned_line = SERVO_COMMAND_PATTERN.sub('', raw_line).strip()
+        cleaned_line = SERVO_COMMAND_PATTERN.sub('', expanded_line).strip()
         if cleaned_line:
             cleaned_lines.append(cleaned_line)
+
+    for idx, (axis, angle) in enumerate(pending_commands, start=1):
+        send_servo_command(axis, angle)
+        if idx < len(pending_commands) and SERVO_COMMAND_DELAY_SEC > 0:
+            time.sleep(SERVO_COMMAND_DELAY_SEC)
 
     return "\n".join(cleaned_lines)
 
@@ -536,7 +626,7 @@ def speech_to_text_with_gemini(audio_path: str) -> str:
         print("音声をテキストに変換中...")
         
         audio_file = genai.upload_file(path=audio_path)
-        response = model.generate_content([
+        response = generate_content_with_retry([
             "この音声を正確に文字起こししてください。テキストのみを返してください。また、意味が読み取れない部分があれば意訳をお願いします。",
             audio_file
         ])
